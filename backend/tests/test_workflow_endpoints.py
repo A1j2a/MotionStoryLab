@@ -86,3 +86,27 @@ async def test_topic_selection_and_content_package_flow(client: AsyncClient):
     yt_res = await client.post(f"/api/v1/projects/{project_id}/youtube/upload", json={"privacy_status": "private"})
     # Note: final.mp4 not rendered yet, returns 400 with clear message
     assert yt_res.status_code in (200, 400)
+
+
+@pytest.mark.asyncio
+async def test_ai_settings_endpoint(client: AsyncClient):
+    # 1. Get AI settings
+    get_res = await client.get("/api/v1/settings/ai")
+    assert get_res.status_code == 200
+    data = get_res.json()
+    assert "openrouter_enabled" in data
+    assert "openrouter_model" in data
+    assert "available_models" in data
+
+    # 2. Update AI settings
+    update_payload = {
+        "openrouter_enabled": True,
+        "openrouter_model": "deepseek/deepseek-r1:free",
+        "openrouter_api_key": "sk-or-v1-testkey1234567890",
+    }
+    post_res = await client.post("/api/v1/settings/ai", json=update_payload)
+    assert post_res.status_code == 200
+    updated_data = post_res.json()
+    assert updated_data["openrouter_enabled"] is True
+    assert updated_data["openrouter_model"] == "deepseek/deepseek-r1:free"
+    assert updated_data["openrouter_api_key_masked"].startswith("sk-or-")

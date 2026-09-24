@@ -33,13 +33,20 @@ class TopicSelectPayload(BaseModel):
 
 @router.get("/discover", response_model=List[Dict[str, Any]])
 async def get_discovered_topics(
-    limit: int = Query(12, ge=5, le=20, description="Number of topic opportunities to generate"),
+    limit: int = Query(8, ge=3, le=20, description="Number of topic opportunities to generate"),
 ):
     """
     Step 1: '🔥 Find Today's Kids Topics'
-    Researches current kids topic opportunities and returns 10-15 topic candidates.
+    Researches current kids topic opportunities exclusively from Live AI.
     """
-    return discover_kids_topics(limit=limit)
+    import asyncio
+    try:
+        return await asyncio.to_thread(discover_kids_topics, limit)
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail=str(e),
+        )
 
 
 @router.post("/select", response_model=ProjectRead, status_code=status.HTTP_201_CREATED)

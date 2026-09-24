@@ -7,6 +7,8 @@ from app.api.v1.assets import router as assets_router
 from app.api.v1.logs import router as logs_router
 from app.api.v1.dashboard import router as dashboard_router
 from app.api.v1.storage import router as storage_router
+from app.api.v1.settings_api import router as settings_router
+from app.api.v1.services_api import router as services_router
 
 # New workflow routers
 from app.api.v1.topics import router as topics_router
@@ -25,6 +27,8 @@ api_router.include_router(storyboard_router)
 api_router.include_router(qc_router)
 api_router.include_router(youtube_router)
 
+api_router.include_router(settings_router)
+api_router.include_router(services_router)
 api_router.include_router(projects_router)
 api_router.include_router(jobs_router)
 api_router.include_router(scenes_router)

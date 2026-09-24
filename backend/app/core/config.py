@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-BASE_DIR = Path(__file__).resolve().parent.parent.parent.parent  # youtube-ai-studio
+BASE_DIR = Path(__file__).resolve().parent.parent.parent.parent
 
 
 class Settings(BaseSettings):
@@ -23,7 +23,15 @@ class Settings(BaseSettings):
                 return f"{prefix}{BASE_DIR / clean_rel}"
         return self.DATABASE_URL
 
-    AI_PROVIDER: str = "ollama"
+    # AI Provider Settings
+    AI_PROVIDER: str = "ollama"  # openrouter, claude, omniroute, ollama, fallback
+
+    # OpenRouter Integration (Deep Research & Lyrics)
+    OPENROUTER_ENABLED: bool = False
+    OPENROUTER_API_KEY: str = ""
+    OPENROUTER_MODEL: str = "deepseek/deepseek-r1:free"
+    OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
+
     OMNIROUTE_URL: str = "http://127.0.0.1:20128"
     OMNIROUTE_API_KEY: str = ""
     OMNIROUTE_MODEL: str = "omniroute-default"

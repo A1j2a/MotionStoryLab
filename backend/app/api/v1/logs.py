@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 from typing import List, Dict, Any
 from fastapi import APIRouter, HTTPException, Query, status
@@ -5,23 +6,31 @@ from app.core.config import settings
 
 router = APIRouter(prefix="/logs", tags=["logs"])
 
-ALLOWED_LOG_FILES = {
-    "app.log",
-    "ai.log",
-    "blender.log",
-    "comfyui.log",
-    "ffmpeg.log",
-}
+
+def get_safe_log_files() -> List[str]:
+    log_dir = settings.resolved_log_dir
+    if not log_dir.exists():
+        return ["app.log"]
+    files = []
+    for f in log_dir.glob("*.log"):
+        if f.is_file() and not f.name.startswith("."):
+            files.append(f.name)
+    default_files = ["app.log", "ai.log", "blender.log", "comfyui.log", "ffmpeg.log", "tts.log", "ollama.log", "n8n.log"]
+    for df in default_files:
+        if df not in files:
+            files.append(df)
+    return sorted(files)
 
 
 @router.get("/")
 async def list_available_logs() -> Dict[str, Any]:
     """
-    Lists the available log files and their on-disk status.
+    Lists all available log files and their on-disk status.
     """
     log_dir = settings.resolved_log_dir
+    safe_files = get_safe_log_files()
     logs_info = []
-    for filename in sorted(ALLOWED_LOG_FILES):
+    for filename in safe_files:
         file_path = log_dir / filename
         exists = file_path.is_file()
         size = file_path.stat().st_size if exists else 0
@@ -38,17 +47,16 @@ async def list_available_logs() -> Dict[str, Any]:
 @router.get("/{filename}")
 async def read_log_file(
     filename: str,
-    lines: int = Query(100, ge=1, le=1000, description="Number of tail lines to read"),
+    lines: int = Query(150, ge=1, le=1000, description="Number of tail lines to read"),
 ) -> Dict[str, Any]:
     """
-    Securely reads recent lines from an allowed log file.
-    Guards against path traversal and unauthorized file reads.
+    Securely reads recent lines from any active tool log file.
     """
-    # Strict allow-list validation
-    if filename not in ALLOWED_LOG_FILES:
+    # Sanitize filename (letters, numbers, underscores, dashes, dots only)
+    if not re.match(r"^[a-zA-Z0-9_\-]+\.log$", filename):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid log file. Allowed: {sorted(list(ALLOWED_LOG_FILES))}",
+            detail="Invalid log filename format. Must be <name>.log",
         )
 
     log_path = settings.resolved_log_dir / filename
@@ -57,7 +65,8 @@ async def read_log_file(
         return {
             "filename": filename,
             "lines": [],
-            "message": f"Log file '{filename}' has not been written to yet.",
+            "total_lines": 0,
+            "message": f"Log file '{filename}' has not recorded entries yet.",
         }
 
     try:
@@ -72,5 +81,5 @@ async def read_log_file(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to read log file",
+            detail=f"Failed to read log file: {str(e)}",
         )

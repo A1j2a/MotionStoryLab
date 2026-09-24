@@ -1,5 +1,6 @@
 export type JobStatus =
   | "DRAFT"
+  | "PROCESSING"
   | "TOPIC_DISCOVERY"
   | "TOPIC_SELECTED"
   | "PLANNING"
@@ -25,7 +26,8 @@ export type JobStatus =
   | "APPROVED"
   | "UPLOADING"
   | "COMPLETED"
-  | "FAILED";
+  | "FAILED"
+  | (string & {});
 
 export interface TopicOpportunity {
   topic: string;
@@ -150,40 +152,56 @@ export interface QCResult {
     characters: boolean;
     subtitles: boolean;
   };
-  details: string[];
-  timestamp?: string;
+  metrics: {
+    video_duration: number;
+    audio_duration: number;
+    duration_delta: number;
+    video_resolution: string;
+    video_fps: number;
+    audio_sample_rate: number;
+    total_scenes: number;
+    rendered_scenes: number;
+    failed_scenes: number;
+    lyrics_word_count: number;
+    character_count: number;
+    subtitles_generated: boolean;
+  };
+  details?: any[];
+  errors: string[];
+  warnings: string[];
 }
 
 export interface Project {
   id: string;
   title: string;
   topic: string;
-  language: string;
-  duration_min: number;
-  duration_max: number;
+  status: JobStatus;
+  target_duration?: number;
+  duration_min?: number;
+  duration_max?: number;
+  music_style?: string | null;
+  voice_style?: string | null;
   video_type: string;
   visual_style: string;
   target_age: string;
-  character_style?: string | null;
-  music_style?: string | null;
-  voice_style?: string | null;
-  status: string;
-  lyrics_text?: string | null;
+  language: string;
   metadata_json?: Record<string, any> | null;
   created_at: string;
   updated_at: string;
-  characters?: Character[];
-  scenes?: Scene[];
   jobs?: Job[];
+  scenes?: Scene[];
+  characters?: Character[];
   assets?: Asset[];
 }
 
 export interface Job {
   id: string;
   project_id: string;
+  type: string;
   status: JobStatus;
-  current_step: string;
   progress: number;
+  stage: string;
+  current_step: string;
   error?: string | null;
   created_at: string;
   updated_at: string;
@@ -193,10 +211,12 @@ export interface Character {
   id: string;
   project_id: string;
   name: string;
-  type: string;
-  appearance: string;
-  colors?: string[] | null;
+  type?: string | null;
+  species?: string | null;
+  appearance?: string | null;
   clothing?: string | null;
+  colors?: string[] | null;
+  description?: string | null;
   personality?: string | null;
   age?: string | null;
   voice?: string | null;
@@ -212,7 +232,7 @@ export interface Scene {
   scene_number: number;
   duration: number;
   environment: string;
-  characters?: string[];
+  characters?: any;
   actions?: string[];
   camera?: Record<string, any> | null;
   lighting?: Record<string, any> | null;
@@ -275,4 +295,38 @@ export interface SeoData {
   tags_list: string[];
   chapters: Array<{ time: string; title: string }>;
   chapters_formatted: string;
+}
+
+export interface AIModelOption {
+  id: string;
+  name: string;
+  is_free: boolean;
+}
+
+export interface AISettings {
+  openrouter_enabled: boolean;
+  openrouter_api_key: string;
+  openrouter_api_key_masked: string;
+  openrouter_model: string;
+  active_provider: string;
+  available_models: AIModelOption[];
+}
+
+export interface TestConnectionResult {
+  success: boolean;
+  latency_ms: number;
+  model: string;
+  response: string;
+  detail?: string;
+}
+
+export interface ServiceToolItem {
+  key: string;
+  name: string;
+  port: number | null;
+  running: boolean;
+  pid: number | string | null;
+  log_file: string;
+  description: string;
+  can_toggle: boolean;
 }

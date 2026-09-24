@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import Link from "next/link";
 import { Header } from "@/components/Header";
 import { TopicDiscovery } from "@/components/TopicDiscovery";
@@ -38,12 +38,22 @@ import {
   Loader2,
   ChevronRight,
   Flame,
+  Power,
+  PowerOff,
+  Trash2,
+  Zap,
 } from "lucide-react";
+
+const ACTIVE_PROJ_KEY = "motionstory_active_project_id";
+const WORKFLOW_ACTIVE_KEY = "motionstory_workflow_active";
 
 export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Workflow Master Switch (ON / OFF)
+  const [workflowActive, setWorkflowActive] = useState<boolean>(true);
 
   // Active workflow state
   const [activeProject, setActiveProject] = useState<Project | null>(null);
@@ -62,15 +72,16 @@ export default function DashboardPage() {
   // Audio player state
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const loadDashboardData = async () => {
     try {
       const [statsData, projectsData] = await Promise.all([
-        api.getDashboardStats(),
-        api.getProjects(),
+        api.getDashboardStats().catch(() => null),
+        api.getProjects().catch(() => []),
       ]);
-      setStats(statsData);
-      setProjects(projectsData);
+      if (statsData) setStats(statsData);
+      if (projectsData) setProjects(projectsData);
     } catch (err) {
       console.error("Failed to load dashboard data:", err);
     } finally {
@@ -78,13 +89,59 @@ export default function DashboardPage() {
     }
   };
 
-  useEffect(() => {
-    loadDashboardData();
+  const restoreActiveProjectState = useCallback(async (projectId: string) => {
+    try {
+      const proj = await api.getProject(projectId);
+      if (!proj) return;
+      setActiveProject(proj);
+
+      // Restore downstream stages in parallel
+      const [pkg, timeline, qc] = await Promise.all([
+        api.getContentPackage(projectId).catch(() => null),
+        api.getAudioTimeline(projectId).catch(() => null),
+        api.getQCReport(projectId).catch(() => null),
+      ]);
+
+      if (pkg) setContentPkg(pkg);
+      if (timeline) setAudioTimeline(timeline);
+      if (qc) setQcResult(qc);
+      if (proj.scenes && proj.scenes.length > 0) setScenes(proj.scenes);
+    } catch {
+      localStorage.removeItem(ACTIVE_PROJ_KEY);
+    }
   }, []);
 
-  // Poll active project when processing
+  // Initial load & Restore persistence from localStorage
   useEffect(() => {
-    if (!activeProject) return;
+    loadDashboardData();
+
+    const savedWorkflow = localStorage.getItem(WORKFLOW_ACTIVE_KEY);
+    if (savedWorkflow !== null) {
+      setWorkflowActive(savedWorkflow === "true");
+    }
+
+    const savedProjectId = localStorage.getItem(ACTIVE_PROJ_KEY);
+    if (savedProjectId) {
+      restoreActiveProjectState(savedProjectId);
+    }
+  }, [restoreActiveProjectState]);
+
+  // Synchronize active project ID with localStorage
+  useEffect(() => {
+    if (activeProject) {
+      localStorage.setItem(ACTIVE_PROJ_KEY, activeProject.id);
+    }
+  }, [activeProject]);
+
+  // Controlled, safe polling (only when workflow is ON and project is in active processing)
+  useEffect(() => {
+    if (pollTimerRef.current) {
+      clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+
+    if (!workflowActive || !activeProject) return;
+
     const isProcessing =
       activeProject.status === "PROCESSING" ||
       (activeProject.jobs &&
@@ -95,18 +152,46 @@ export default function DashboardPage() {
 
     if (!isProcessing) return;
 
-    const interval = setInterval(async () => {
+    pollTimerRef.current = setInterval(async () => {
       try {
         const p = await api.getProject(activeProject.id);
-        setActiveProject(p);
-        if (p.scenes) setScenes(p.scenes);
+        if (p) {
+          setActiveProject(p);
+          if (p.scenes) setScenes(p.scenes);
+        }
       } catch {
-        // ignore
+        // ignore intermittent errors
       }
     }, 3000);
 
-    return () => clearInterval(interval);
-  }, [activeProject]);
+    return () => {
+      if (pollTimerRef.current) {
+        clearInterval(pollTimerRef.current);
+        pollTimerRef.current = null;
+      }
+    };
+  }, [workflowActive, activeProject?.id, activeProject?.status]);
+
+  // Toggle Workflow Master Switch
+  const handleToggleWorkflow = () => {
+    const nextState = !workflowActive;
+    setWorkflowActive(nextState);
+    localStorage.setItem(WORKFLOW_ACTIVE_KEY, String(nextState));
+  };
+
+  // Reset / Clear Active Production
+  const handleResetActiveProject = () => {
+    if (!confirm("Are you sure you want to clear current active production from the studio workspace? Progress will remain saved in database.")) {
+      return;
+    }
+    localStorage.removeItem(ACTIVE_PROJ_KEY);
+    setActiveProject(null);
+    setContentPkg(null);
+    setAudioTimeline(null);
+    setScenes([]);
+    setQcResult(null);
+    setUploadSuccess(null);
+  };
 
   // Step 1: Handle selecting topic
   const handleSelectTopic = async (topic: TopicOpportunity) => {
@@ -142,7 +227,6 @@ export default function DashboardPage() {
     setSongLoading(true);
     try {
       await api.generateSong(activeProject.id);
-      // Wait for audio synthesis & analysis to complete
       let attempts = 0;
       const poll = setInterval(async () => {
         attempts++;
@@ -237,6 +321,59 @@ export default function DashboardPage() {
       />
 
       <main className="p-8 space-y-8 flex-1 max-w-6xl mx-auto w-full">
+        {/* Studio Status & Master Process Control Bar */}
+        <div className="bg-white border border-[#E5E5EA] rounded-2xl p-4 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center border ${
+              workflowActive ? "bg-emerald-50 text-emerald-600 border-emerald-200" : "bg-slate-100 text-slate-500 border-slate-200"
+            }`}>
+              <Zap className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-sm text-[#1D1D1F]">Pipeline Master Control</span>
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                  workflowActive ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-700"
+                }`}>
+                  {workflowActive ? "PROCESS RUNNING (ON)" : "PROCESS PAUSED (OFF)"}
+                </span>
+              </div>
+              <p className="text-xs text-[#86868B] mt-0.5">
+                {activeProject
+                  ? `Active Production: "${activeProject.title}" • Status: ${activeProject.status}`
+                  : "No active production selected. Discover or pick a topic below."}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2.5">
+            {/* Master Process Switch Button */}
+            <button
+              onClick={handleToggleWorkflow}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow-xs ${
+                workflowActive
+                  ? "bg-[#10B981] hover:bg-[#059669] text-white"
+                  : "bg-slate-700 hover:bg-slate-800 text-white"
+              }`}
+            >
+              <Power className="w-3.5 h-3.5" />
+              <span>{workflowActive ? "Process: ON" : "Process: OFF"}</span>
+            </button>
+
+            {/* Clear / Start Fresh Button */}
+            {activeProject && (
+              <button
+                onClick={handleResetActiveProject}
+                className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-[#FEF2F2] text-[#DC2626] hover:bg-[#FEE2E2] border border-[#FECACA] transition-all cursor-pointer flex items-center gap-1.5"
+                title="Reset workspace to select a new topic"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Reset / New Topic</span>
+              </button>
+            )}
+          </div>
+        </div>
+
         {/* Studio Stats Grid */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div className="bg-white border border-[#E5E5EA] rounded-2xl p-5 shadow-xs space-y-2">
@@ -409,8 +546,10 @@ export default function DashboardPage() {
               scenes={scenes}
               onSceneRerendered={async () => {
                 const p = await api.getProject(activeProject.id);
-                setActiveProject(p);
-                if (p.scenes) setScenes(p.scenes);
+                if (p) {
+                  setActiveProject(p);
+                  if (p.scenes) setScenes(p.scenes);
+                }
               }}
             />
 
@@ -560,8 +699,10 @@ export default function DashboardPage() {
                   key={proj.id}
                   onClick={() => {
                     setActiveProject(proj);
+                    localStorage.setItem(ACTIVE_PROJ_KEY, proj.id);
                     api.getContentPackage(proj.id).then(setContentPkg).catch(() => {});
                     api.getAudioTimeline(proj.id).then(setAudioTimeline).catch(() => {});
+                    api.getQCReport(proj.id).then(setQcResult).catch(() => {});
                     if (proj.scenes) setScenes(proj.scenes);
                   }}
                   className={`bg-white hover:bg-[#FAFAFC] border rounded-2xl p-5 transition-all shadow-xs group block space-y-3 cursor-pointer ${
