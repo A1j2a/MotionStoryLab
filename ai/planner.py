@@ -28,7 +28,7 @@ def call_claude_if_available(prompt: str, system_prompt: str = "") -> Optional[D
     payload = {
         "model": model,
         "max_tokens": 2048,
-        "system": system_prompt or "You are an elite preschool animation and YouTube Kids SEO master (Cocomelon, Super Simple Songs). Return valid JSON only.",
+        "system": system_prompt or "You are an elite preschool animation and YouTube Kids SEO master (100% original, copyright-free). Return valid JSON only.",
         "messages": [
             {"role": "user", "content": prompt}
         ],
@@ -88,7 +88,7 @@ def call_llm_if_available(prompt: str, system_prompt: str = "") -> Optional[Dict
     payload = {
         "model": model,
         "messages": [
-            {"role": "system", "content": system_prompt or "You are an award-winning preschool animation creator (Cocomelon, Super Simple Songs). Return valid JSON only."},
+            {"role": "system", "content": system_prompt or "You are an award-winning preschool animation creator (100% original, copyright-free). Return valid JSON only."},
             {"role": "user", "content": prompt},
         ],
         "temperature": 0.7,
@@ -126,7 +126,7 @@ def generate_preschool_lyrics(topic: str, duration_min: int = 5) -> Dict[str, An
     # 1. Try external AI if connected
     ai_result = call_llm_if_available(
         prompt=f"Generate original preschool nursery rhyme lyrics for toddlers about: '{topic_clean}'. Provide 4 verses (Verse 1, Chorus, Verse 2, Outro) with character actions. Format as JSON with keys: title, verses (list of objects with section, lines, character, action).",
-        system_prompt="You are a professional children's TV songwriter (Cocomelon, Super Simple Songs). Output valid JSON only."
+        system_prompt="You are a professional children's TV songwriter (100% original, copyright-free). Output valid JSON only."
     )
     if ai_result and "verses" in ai_result and isinstance(ai_result["verses"], list):
         return {
@@ -587,8 +587,8 @@ def generate_scene_list(topic: str, verses: List[Dict[str, Any]]) -> List[Dict[s
 def generate_seo_metadata(
     topic: str,
     project_title: str,
-    verses: List[Dict[str, Any]],
-    scenes: List[Dict[str, Any]],
+    verses: Optional[List[Dict[str, Any]]] = None,
+    scenes: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """
     Generates optimized YouTube metadata package (High-CTR Title, Description, Tags, Chapters).
@@ -641,7 +641,7 @@ Sing, dance, and learn with cute 3D cartoon characters in Pixar-grade animation.
 00:30 - Happy Chorus & Beat
 00:45 - Wave Goodbye & Outro
 
-#nurseryrhymes #kidssongs #toddlerlearning #preschoolcartoons #3danimation #cocomelon #supersimplesongs
+#nurseryrhymes #kidssongs #toddlerlearning #preschoolcartoons #3danimation #preschoolsongs #learningvideos
 """
 
     tags = [
@@ -654,9 +654,7 @@ Sing, dance, and learn with cute 3D cartoon characters in Pixar-grade animation.
         "toddler music",
         "baby cartoon",
         "3d animation kids",
-        "super simple songs",
-        "cocomelon style",
-        "sing along for toddlers",
+                        "sing along for toddlers",
         "kids video studio",
     ]
 

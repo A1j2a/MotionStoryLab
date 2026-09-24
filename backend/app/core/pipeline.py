@@ -28,7 +28,7 @@ from ai.validator import validate_storyboard_scenes
 from audio.providers import get_music_provider
 from audio.analyzer import analyze_audio_timeline
 from audio.synthesizer import generate_subtitles_srt
-from renderer.compositor import concatenate_scenes, composite_final_video, generate_thumbnail
+from renderer.compositor import concatenate_scenes, composite_final_video, generate_thumbnail, generate_high_ctr_thumbnail
 from renderer.storybook_engine import render_illustrated_scene
 from services.qc_service import run_quality_control
 
@@ -94,6 +94,7 @@ async def run_project_pipeline(project_id: str):
             topic=topic,
             video_type=project.video_type,
             target_age=project.target_age,
+            duration_minutes=float(project.duration_min or 2.0),
         )
 
         approved_lyrics = content_pkg["lyrics_full"]
@@ -247,20 +248,38 @@ async def run_project_pipeline(project_id: str):
             scene_mp4 = os.path.join(scenes_dir, f"scene_{idx:03d}.mp4")
             verse_lyrics = shot.get("lyrics", "") or f"{topic} Scene {idx}"
 
+            # 0. Check OpenRouter Video Engine (Seedance 2.0 / Kling / Luma)
+            video_engine_ok = False
+            try:
+                from app.api.v1.settings_api import get_db_config
+                from ai.providers import OpenRouterVideoProvider
+                db_video_on = get_db_config("OPENROUTER_VIDEO_ENABLED", "false").lower() in ("true", "1", "yes")
+                if db_video_on:
+                    v_provider = OpenRouterVideoProvider()
+                    prompt = f"3D Pixar cute animation, {topic}, preschool cartoon show, action: {verse_lyrics}, vibrant colors, smooth camera"
+                    video_engine_ok = await asyncio.to_thread(
+                        v_provider.generate_and_download_video,
+                        prompt=prompt,
+                        output_path=scene_mp4,
+                    )
+            except Exception as ve:
+                logger.warning(f"OpenRouter Video generation bypassed: {ve}")
+
             # 1. Render true 3D scene via Blender 5.2 Metal GPU engine
             blender_ok = False
-            try:
-                from renderer.blender_runner import render_blender_3d_scene
-                blender_ok = await asyncio.to_thread(
-                    render_blender_3d_scene,
-                    scene_number=idx,
-                    topic=topic,
-                    verse_text=verse_lyrics,
-                    duration_sec=float(shot.get("duration", 5.0)),
-                    output_mp4=scene_mp4,
-                )
-            except Exception as be:
-                logger.warning(f"Blender 3D scene render bypassed: {be}")
+            if not video_engine_ok or not os.path.exists(scene_mp4) or os.path.getsize(scene_mp4) < 1000:
+                try:
+                    from renderer.blender_runner import render_blender_3d_scene
+                    blender_ok = await asyncio.to_thread(
+                        render_blender_3d_scene,
+                        scene_number=idx,
+                        topic=topic,
+                        verse_text=verse_lyrics,
+                        duration_sec=float(shot.get("duration", 5.0)),
+                        output_mp4=scene_mp4,
+                    )
+                except Exception as be:
+                    logger.warning(f"Blender 3D scene render bypassed: {be}")
 
             # 2. Fallback to Illustrated Storybook Engine if Blender was unconfigured
             if not blender_ok or not os.path.exists(scene_mp4) or os.path.getsize(scene_mp4) < 1000:
@@ -319,7 +338,14 @@ async def run_project_pipeline(project_id: str):
         )
 
         thumbnail_path = os.path.join(project_dir, "thumbnail.jpg")
-        await asyncio.to_thread(generate_thumbnail, final_video_path, thumbnail_path)
+        await asyncio.to_thread(
+            generate_high_ctr_thumbnail,
+            title=project.title,
+            topic=project.topic or "Kids Song",
+            output_thumbnail_path=thumbnail_path,
+            video_path=final_video_path,
+            character_name=char_list[0].get("name", "Hero") if char_list else "Hero",
+        )
 
         # ==========================================
         # STAGE 7: AUTOMATED QUALITY CONTROL (QC)

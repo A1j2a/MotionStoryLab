@@ -13,6 +13,7 @@ class SceneBase(BaseModel):
     lighting: Optional[Dict[str, Any]] = None
     dialogue: Optional[str] = None
     lyrics: Optional[str] = None
+    video_prompt: Optional[str] = None
     music: Optional[str] = None
     sound_effects: List[str] = Field(default_factory=list)
     transition: Optional[str] = "cut"
@@ -31,6 +32,7 @@ class SceneUpdate(BaseModel):
     lighting: Optional[Dict[str, Any]] = None
     dialogue: Optional[str] = None
     lyrics: Optional[str] = None
+    video_prompt: Optional[str] = None
     music: Optional[str] = None
     sound_effects: Optional[List[str]] = None
     transition: Optional[str] = None

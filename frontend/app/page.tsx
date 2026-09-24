@@ -16,6 +16,7 @@ import {
   Scene,
   AudioTimeline,
   QCResult,
+  SunoPromptPackage,
 } from "@/lib/types";
 import {
   Film,
@@ -32,16 +33,21 @@ import {
   RotateCcw,
   Music,
   ShieldCheck,
-  UploadCloud,
   FileVideo,
-  Download,
   Loader2,
+  Radio,
+  ExternalLink,
+  Check,
+  Copy,
+  UploadCloud,
+  Download,
   ChevronRight,
   Flame,
   Power,
   PowerOff,
   Trash2,
   Zap,
+  Lock,
 } from "lucide-react";
 
 const ACTIVE_PROJ_KEY = "motionstory_active_project_id";
@@ -59,6 +65,9 @@ export default function DashboardPage() {
   const [activeProject, setActiveProject] = useState<Project | null>(null);
   const [contentPkg, setContentPkg] = useState<ContentPackage | null>(null);
   const [audioTimeline, setAudioTimeline] = useState<AudioTimeline | null>(null);
+  const [sunoPackage, setSunoPackage] = useState<SunoPromptPackage | null>(null);
+  const [uploadingAudio, setUploadingAudio] = useState(false);
+  const [copiedSuno, setCopiedSuno] = useState<string | null>(null);
   const [scenes, setScenes] = useState<Scene[]>([]);
   const [qcResult, setQcResult] = useState<QCResult | null>(null);
 
@@ -71,6 +80,7 @@ export default function DashboardPage() {
 
   // Audio player state
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
+  const [audioCacheBust, setAudioCacheBust] = useState(Date.now());
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -201,6 +211,7 @@ export default function DashboardPage() {
         title: topic.suggested_title,
         category: topic.category,
         target_age: topic.target_age,
+        duration: topic.duration || "2–3 Minutes",
         content_angle: topic.content_angle,
         why_worth_considering: topic.why_worth_considering,
         opportunity_signals: topic.opportunity_signals,
@@ -219,6 +230,58 @@ export default function DashboardPage() {
     } catch (err: any) {
       alert("Failed to initialize project from topic: " + err.message);
     }
+  };
+
+  // Fetch Suno AI Prompt Package
+  const handleLoadSunoPrompt = async () => {
+    if (!activeProject) return;
+    try {
+      const pkg = await api.getSunoPrompt(activeProject.id);
+      setSunoPackage(pkg);
+    } catch (err: any) {
+      console.error("Failed to load Suno prompt:", err);
+    }
+  };
+
+  // Upload Suno AI Song Track with synchronized Musical Section Map & Video Prompts
+  const handleAudioUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !activeProject) return;
+    setUploadingAudio(true);
+    try {
+      const res = await api.uploadSongAudio(activeProject.id, file, contentPkg?.approved_lyrics);
+      if (res && res.timeline) {
+        setAudioTimeline(res.timeline);
+
+        // Refresh project and storyboard scenes with dedicated 3D video prompts
+        const [updatedProject, sbScenes] = await Promise.all([
+          api.getProject(activeProject.id).catch(() => null),
+          api.getScenes(activeProject.id).catch(() => []),
+        ]);
+        if (updatedProject) setActiveProject(updatedProject);
+        if (sbScenes && sbScenes.length > 0) setScenes(sbScenes);
+
+        // Force reload audio player with uploaded song
+        setAudioCacheBust(Date.now());
+        if (audioRef.current) {
+          audioRef.current.src = `${api.getSongAudioUrl(activeProject.id)}?t=${Date.now()}`;
+          audioRef.current.load();
+          setIsPlayingAudio(false);
+        }
+
+        alert("Song uploaded and timeline synchronized successfully!\n• Subtitles (.srt) regenerated\n• Musical Section Map updated with uploaded audio\n• 3D Video Generation Prompts ready with copy button for every scene!");
+      }
+    } catch (err: any) {
+      alert("Audio upload failed: " + err.message);
+    } finally {
+      setUploadingAudio(false);
+    }
+  };
+
+  const copySunoText = (text: string, key: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedSuno(key);
+    setTimeout(() => setCopiedSuno(null), 2000);
   };
 
   // Step 3: Trigger Song Generation from exact approved lyrics
@@ -255,18 +318,36 @@ export default function DashboardPage() {
     }
   };
 
-  // Step 5 & 6: Render 3D Scenes
+  // Step 5 & 6: Render 3D Scenes with Real-Time Progress Polling
   const handleRenderScenes = async () => {
     if (!activeProject) return;
     setRenderLoading(true);
     try {
       await api.renderScenes(activeProject.id);
-      setTimeout(async () => {
-        const p = await api.getProject(activeProject.id);
-        setActiveProject(p);
-        if (p.scenes) setScenes(p.scenes);
-        setRenderLoading(false);
-      }, 3000);
+      
+      let attempts = 0;
+      const poll = setInterval(async () => {
+        attempts++;
+        try {
+          const p = await api.getProject(activeProject.id);
+          if (p) {
+            setActiveProject(p);
+            if (p.scenes) setScenes(p.scenes);
+            const allDone = p.scenes && p.scenes.length > 0 && p.scenes.every((s: any) => s.status === "COMPLETED");
+            if (allDone || p.status === "READY" || p.status === "READY_FOR_REVIEW") {
+              clearInterval(poll);
+              setRenderLoading(false);
+              loadDashboardData();
+            }
+          }
+        } catch {
+          // ignore transient poll error
+        }
+        if (attempts > 120) { // 5 minutes max timeout
+          clearInterval(poll);
+          setRenderLoading(false);
+        }
+      }, 2500);
     } catch (err: any) {
       alert("Scene rendering failed: " + err.message);
       setRenderLoading(false);
@@ -444,36 +525,139 @@ export default function DashboardPage() {
               <div className="space-y-1">
                 <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200">
                   <Music className="w-3.5 h-3.5 text-amber-600" />
-                  <span>Step 3 • Song Generation & Audio Analysis</span>
+                  <span>Step 3 • Song Generation & Suno AI Hub</span>
                 </div>
                 <h2 className="text-lg font-bold text-[#1D1D1F]">
-                  Generate Master Song from Exact Approved Lyrics
+                  Master Nursery Song & Audio Timeline Synchronization
                 </h2>
                 <p className="text-xs text-[#6E6E73]">
-                  Synthesizes the vocal melody and extracts exact BPM, section divisions, and lyric timestamps for scene alignment.
+                  Generate automatically with local neural voices or use Suno AI with custom prompt & drag-and-drop audio upload.
                 </p>
               </div>
 
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-2.5">
+                <button
+                  onClick={handleLoadSunoPrompt}
+                  className="inline-flex items-center gap-1.5 bg-[#FFF7ED] text-[#EA580C] border border-[#FED7AA] hover:bg-[#FFEDD5] text-xs font-bold px-3.5 py-2 rounded-xl transition-all cursor-pointer"
+                >
+                  <Radio className="w-3.5 h-3.5" />
+                  <span>Suno AI Prompt Hub</span>
+                </button>
+
+                <label className="inline-flex items-center gap-1.5 bg-[#F0FDF4] text-[#16A34A] border border-[#BBF7D0] hover:bg-[#DCFCE7] text-xs font-bold px-3.5 py-2 rounded-xl transition-all cursor-pointer">
+                  <UploadCloud className="w-3.5 h-3.5" />
+                  <span>{uploadingAudio ? "Uploading & Syncing..." : "Upload Suno Track (MP3/WAV)"}</span>
+                  <input
+                    type="file"
+                    accept="audio/*"
+                    onChange={handleAudioUpload}
+                    disabled={uploadingAudio}
+                    className="hidden"
+                  />
+                </label>
+
                 <button
                   onClick={handleGenerateSong}
                   disabled={songLoading}
-                  className="inline-flex items-center gap-2 bg-gradient-to-r from-[#FF6B00] to-[#EA580C] hover:opacity-95 text-white text-xs font-bold px-5 py-2.5 rounded-xl shadow-md shadow-orange-500/20 transition-all cursor-pointer disabled:opacity-50"
+                  className="inline-flex items-center gap-2 bg-gradient-to-r from-[#FF6B00] to-[#EA580C] hover:opacity-95 text-white text-xs font-bold px-4 py-2 rounded-xl shadow-md shadow-orange-500/20 transition-all cursor-pointer disabled:opacity-50"
                 >
                   {songLoading ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>Synthesizing Song...</span>
+                      <span>Synthesizing...</span>
                     </>
                   ) : (
                     <>
                       <Music className="w-4 h-4" />
-                      <span>Generate Song</span>
+                      <span>Auto Synthesize</span>
                     </>
                   )}
                 </button>
               </div>
             </div>
+
+            {/* Suno AI Music Prompt Hub Box */}
+            {sunoPackage && (
+              <div className="bg-[#FFFBEB] border border-[#FDE68A] rounded-2xl p-5 space-y-4 animate-in fade-in duration-200">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-amber-900 font-bold text-xs">
+                    <Radio className="w-4 h-4 text-amber-600 animate-pulse" />
+                    <span>Suno AI Music Generation Studio Hub (v3.5 / v4)</span>
+                  </div>
+                  <a
+                    href={sunoPackage.suno_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 px-3 py-1.5 rounded-lg flex items-center gap-1 shadow-xs transition-all"
+                  >
+                    <span>Open Suno.ai Studio</span>
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                  {/* Suno Style Prompt */}
+                  <div className="bg-white border border-[#FDE68A] p-3.5 rounded-xl space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold text-amber-800 uppercase tracking-wider">
+                        1. Suno Style of Music Prompt
+                      </span>
+                      <button
+                        onClick={() => copySunoText(sunoPackage.style_prompt, "style")}
+                        className="text-[10px] font-bold text-amber-700 hover:underline flex items-center gap-1 cursor-pointer"
+                      >
+                        {copiedSuno === "style" ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                        <span>{copiedSuno === "style" ? "Copied" : "Copy Prompt"}</span>
+                      </button>
+                    </div>
+                    <p className="text-xs font-mono text-neutral-800 bg-[#FAFAFA] p-2.5 rounded-lg border border-neutral-200 leading-relaxed">
+                      {sunoPackage.style_prompt}
+                    </p>
+                  </div>
+
+                  {/* Suno Title */}
+                  <div className="bg-white border border-[#FDE68A] p-3.5 rounded-xl space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold text-amber-800 uppercase tracking-wider">
+                        2. Suno Song Title
+                      </span>
+                      <button
+                        onClick={() => copySunoText(sunoPackage.suno_title, "title")}
+                        className="text-[10px] font-bold text-amber-700 hover:underline flex items-center gap-1 cursor-pointer"
+                      >
+                        {copiedSuno === "title" ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                        <span>{copiedSuno === "title" ? "Copied" : "Copy Title"}</span>
+                      </button>
+                    </div>
+                    <p className="text-xs font-mono font-bold text-neutral-800 bg-[#FAFAFA] p-2.5 rounded-lg border border-neutral-200">
+                      {sunoPackage.suno_title}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Suno Tagged Lyrics */}
+                <div className="bg-white border border-[#FDE68A] p-3.5 rounded-xl space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold text-amber-800 uppercase tracking-wider">
+                      3. Formatted Lyrics with Suno Structure Tags ([Verse 1], [Chorus], [Outro])
+                    </span>
+                    <button
+                      onClick={() => copySunoText(sunoPackage.suno_lyrics, "lyrics")}
+                      className="text-[10px] font-bold text-amber-700 hover:underline flex items-center gap-1 cursor-pointer"
+                    >
+                      {copiedSuno === "lyrics" ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                      <span>{copiedSuno === "lyrics" ? "Copied All Lyrics" : "Copy Formatted Lyrics"}</span>
+                    </button>
+                  </div>
+                  <textarea
+                    rows={6}
+                    readOnly
+                    value={sunoPackage.suno_lyrics}
+                    className="w-full text-xs font-mono text-neutral-800 bg-[#FAFAFA] p-2.5 rounded-lg border border-neutral-200 leading-relaxed"
+                  />
+                </div>
+              </div>
+            )}
 
             {/* Audio Player & Analyzed Timeline Display */}
             {audioTimeline && (
@@ -491,21 +675,31 @@ export default function DashboardPage() {
                         Master Nursery Song ({audioTimeline.duration.toFixed(1)}s)
                       </span>
                       <span className="text-[11px] text-[#6E6E73]">
-                        BPM: {audioTimeline.bpm} • {audioTimeline.sections.length} Sections • Synchronized to Lyrics
+                        BPM: {audioTimeline.bpm} • {audioTimeline.sections?.length || 0} Sections • Synchronized to Lyrics
                       </span>
                     </div>
                   </div>
 
                   <audio
                     ref={audioRef}
-                    src={api.getSongAudioUrl(activeProject.id)}
+                    src={`${api.getSongAudioUrl(activeProject.id)}?t=${audioCacheBust}`}
                     onEnded={() => setIsPlayingAudio(false)}
                     className="hidden"
                   />
 
-                  <div className="flex items-center gap-2 text-xs font-semibold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-200">
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span>Audio Timeline Analyzed</span>
+                  <div className="flex items-center gap-2">
+                    <a
+                      href={api.getSubtitlesDownloadUrl(activeProject.id)}
+                      download={`${activeProject.title}.srt`}
+                      className="flex items-center gap-1 text-xs font-bold text-[#EA580C] bg-[#FFF7ED] hover:bg-[#FFEDD5] border border-[#FED7AA] px-3 py-1 rounded-full transition-all"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Download Subtitles (.srt)</span>
+                    </a>
+                    <div className="flex items-center gap-2 text-xs font-semibold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-200">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>Audio Timeline Synchronized</span>
+                    </div>
                   </div>
                 </div>
 
@@ -515,7 +709,7 @@ export default function DashboardPage() {
                     Musical Section Map
                   </span>
                   <div className="w-full h-8 bg-white border border-[#E5E5EA] rounded-xl overflow-hidden flex">
-                    {audioTimeline.sections.map((sec, idx) => {
+                    {(audioTimeline.sections || []).map((sec, idx) => {
                       const widthPct = ((sec.end - sec.start) / audioTimeline.duration) * 100;
                       const colors = ["bg-orange-100 text-orange-800", "bg-blue-100 text-blue-800", "bg-emerald-100 text-emerald-800", "bg-purple-100 text-purple-800"];
                       return (
@@ -541,6 +735,39 @@ export default function DashboardPage() {
         {/* STEP 4 & 5: STORYBOARD & 3D SCENE RENDERING */}
         {activeProject && scenes.length > 0 && (
           <section className="space-y-4">
+            {/* Live Rendering Progress Banner */}
+            {renderLoading && (
+              <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-pulse">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-xs">
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  </div>
+                  <div>
+                    <span className="text-xs font-bold text-blue-900 block">
+                      Rendering 3D Shots in Progress ({scenes.filter((s) => s.status === "COMPLETED").length} of {scenes.length} Scenes Finished)...
+                    </span>
+                    <span className="text-[11px] text-blue-700">
+                      Blender GPU engine is generating camera paths, lighting & individual scene MP4 files.
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3 self-end sm:self-auto">
+                  <div className="w-28 bg-blue-200/80 rounded-full h-2 overflow-hidden">
+                    <div
+                      className="bg-blue-600 h-full transition-all duration-300 rounded-full"
+                      style={{
+                        width: `${Math.round(((scenes.filter((s) => s.status === "COMPLETED").length || 0) / (scenes.length || 1)) * 100)}%`,
+                      }}
+                    />
+                  </div>
+                  <span className="text-xs font-mono font-bold text-blue-800">
+                    {Math.round(((scenes.filter((s) => s.status === "COMPLETED").length || 0) / (scenes.length || 1)) * 100)}%
+                  </span>
+                </div>
+              </div>
+            )}
+
             <StoryboardView
               projectId={activeProject.id}
               scenes={scenes}
@@ -562,7 +789,7 @@ export default function DashboardPage() {
                 {renderLoading ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Rendering 3D Scenes...</span>
+                    <span>Rendering Shots ({scenes.filter((s) => s.status === "COMPLETED").length}/{scenes.length})...</span>
                   </>
                 ) : (
                   <>
@@ -575,100 +802,124 @@ export default function DashboardPage() {
           </section>
         )}
 
-        {/* STEP 8: QUALITY CONTROL (QC) */}
+        {/* STEP 8: QUALITY CONTROL (QC) - Sequentially Gated */}
         {activeProject && (
           <section className="space-y-4">
-            <QCCheckView
-              qcResult={qcResult}
-              onRerunQC={handleRunQC}
-              loading={qcLoading}
-            />
+            {scenes.length > 0 && (scenes.some((s) => s.status === "COMPLETED") || activeProject.status === "READY" || activeProject.status === "READY_FOR_REVIEW") ? (
+              <QCCheckView
+                qcResult={qcResult}
+                onRerunQC={handleRunQC}
+                loading={qcLoading}
+              />
+            ) : (
+              <div className="bg-white border border-[#E5E5EA] rounded-2xl p-6 text-center space-y-2 opacity-65">
+                <div className="w-8 h-8 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center mx-auto">
+                  <Lock className="w-4 h-4" />
+                </div>
+                <h3 className="text-xs font-bold text-[#1D1D1F]">Step 8 • Quality Control (QC)</h3>
+                <p className="text-[11px] text-[#6E6E73]">
+                  🔒 Complete Step 4 (&quot;Render All 3D Scenes&quot;) above to unlock automated Quality Control.
+                </p>
+              </div>
+            )}
           </section>
         )}
 
-        {/* STEP 9 & 10: PREVIEW, APPROVE, AND YOUTUBE PRIVATE UPLOAD */}
+        {/* STEP 9 & 10: PREVIEW, APPROVE, AND YOUTUBE PRIVATE UPLOAD - Sequentially Gated */}
         {activeProject && (
-          <section className="bg-white border border-[#E5E5EA] rounded-3xl p-6 shadow-xs space-y-6">
-            <div className="space-y-1 pb-4 border-b border-[#E5E5EA]">
-              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
-                <FileVideo className="w-3.5 h-3.5 text-emerald-600" />
-                <span>Step 9 & 10 • Final Preview & YouTube Upload</span>
-              </div>
-              <h2 className="text-lg font-bold text-[#1D1D1F]">
-                Video Preview & Distribution
-              </h2>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-              {/* Video Player */}
-              <div className="rounded-2xl overflow-hidden bg-black aspect-video relative flex items-center justify-center border border-[#E5E5EA]">
-                <video
-                  controls
-                  className="w-full h-full object-cover"
-                  src={`http://127.0.0.1:8000/api/v1/projects/${activeProject.id}/video`}
-                  poster={`http://127.0.0.1:8000/api/v1/projects/${activeProject.id}/thumbnail`}
-                >
-                  Your browser does not support the video tag.
-                </video>
+          (activeProject.status === "READY" || activeProject.status === "READY_FOR_REVIEW" || (scenes.length > 0 && scenes.every((s) => s.status === "COMPLETED"))) ? (
+            <section className="bg-white border border-[#E5E5EA] rounded-3xl p-6 shadow-xs space-y-6">
+              <div className="space-y-1 pb-4 border-b border-[#E5E5EA]">
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                  <FileVideo className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Step 9 & 10 • Final Preview & YouTube Upload</span>
+                </div>
+                <h2 className="text-lg font-bold text-[#1D1D1F]">
+                  Video Preview & Distribution
+                </h2>
               </div>
 
-              {/* Approval & Upload Actions */}
-              <div className="space-y-5">
-                <div className="space-y-2">
-                  <h3 className="font-extrabold text-base text-[#1D1D1F]">{activeProject.title}</h3>
-                  <p className="text-xs text-[#6E6E73] leading-relaxed">{activeProject.topic}</p>
-                </div>
-
-                <div className="p-4 rounded-2xl bg-[#FAFAFC] border border-[#E5E5EA] space-y-2 text-xs text-[#6E6E73]">
-                  <div className="flex items-center justify-between text-[#1D1D1F] font-bold">
-                    <span>Upload Status:</span>
-                    <span className="text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full text-[10px]">
-                      Strictly PRIVATE Default
-                    </span>
-                  </div>
-                  <p className="text-[11px]">
-                    All initial YouTube uploads are set to PRIVATE for safe creator review in YouTube Studio before public release.
-                  </p>
-                </div>
-
-                {uploadSuccess && (
-                  <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-800 font-semibold flex items-center gap-2">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                    <span>{uploadSuccess}</span>
-                  </div>
-                )}
-
-                <div className="flex flex-wrap items-center gap-3 pt-2">
-                  <a
-                    href={`http://127.0.0.1:8000/api/v1/projects/${activeProject.id}/video`}
-                    download
-                    className="inline-flex items-center gap-2 bg-[#FAFAFC] hover:bg-[#F5F5F7] text-[#1D1D1F] border border-[#E5E5EA] text-xs font-bold px-5 py-3 rounded-xl transition-colors cursor-pointer"
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+                {/* Video Player */}
+                <div className="rounded-2xl overflow-hidden bg-black aspect-video relative flex items-center justify-center border border-[#E5E5EA]">
+                  <video
+                    controls
+                    className="w-full h-full object-cover"
+                    src={`http://127.0.0.1:8000/api/v1/projects/${activeProject.id}/video`}
+                    poster={`http://127.0.0.1:8000/api/v1/projects/${activeProject.id}/thumbnail`}
                   >
-                    <Download className="w-4 h-4" />
-                    <span>Download Final MP4</span>
-                  </a>
+                    Your browser does not support the video tag.
+                  </video>
+                </div>
 
-                  <button
-                    onClick={handleYouTubeUpload}
-                    disabled={uploadLoading}
-                    className="inline-flex items-center gap-2 bg-gradient-to-r from-red-600 to-rose-600 hover:opacity-95 text-white text-xs font-bold px-6 py-3 rounded-xl shadow-md shadow-red-500/20 transition-all cursor-pointer disabled:opacity-50"
-                  >
-                    {uploadLoading ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        <span>Uploading to YouTube (Private)...</span>
-                      </>
-                    ) : (
-                      <>
-                        <UploadCloud className="w-4 h-4" />
-                        <span>Upload to YouTube (Private)</span>
-                      </>
-                    )}
-                  </button>
+                {/* Approval & Upload Actions */}
+                <div className="space-y-5">
+                  <div className="space-y-2">
+                    <h3 className="font-extrabold text-base text-[#1D1D1F]">{activeProject.title}</h3>
+                    <p className="text-xs text-[#6E6E73] leading-relaxed">{activeProject.topic}</p>
+                  </div>
+
+                  <div className="p-4 rounded-2xl bg-[#FAFAFC] border border-[#E5E5EA] space-y-2 text-xs text-[#6E6E73]">
+                    <div className="flex items-center justify-between text-[#1D1D1F] font-bold">
+                      <span>Upload Status:</span>
+                      <span className="text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full text-[10px]">
+                        Strictly PRIVATE Default
+                      </span>
+                    </div>
+                    <p className="text-[11px]">
+                      All initial YouTube uploads are set to PRIVATE for safe creator review in YouTube Studio before public release.
+                    </p>
+                  </div>
+
+                  {uploadSuccess && (
+                    <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-800 font-semibold flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <span>{uploadSuccess}</span>
+                    </div>
+                  )}
+
+                  <div className="flex flex-wrap items-center gap-3 pt-2">
+                    <a
+                      href={`http://127.0.0.1:8000/api/v1/projects/${activeProject.id}/video`}
+                      download
+                      className="inline-flex items-center gap-2 bg-[#FAFAFC] hover:bg-[#F5F5F7] text-[#1D1D1F] border border-[#E5E5EA] text-xs font-bold px-5 py-3 rounded-xl transition-colors cursor-pointer"
+                    >
+                      <Download className="w-4 h-4" />
+                      <span>Download Final MP4</span>
+                    </a>
+
+                    <button
+                      onClick={handleYouTubeUpload}
+                      disabled={uploadLoading}
+                      className="inline-flex items-center gap-2 bg-gradient-to-r from-red-600 to-rose-600 hover:opacity-95 text-white text-xs font-bold px-6 py-3 rounded-xl shadow-md shadow-red-500/20 transition-all cursor-pointer disabled:opacity-50"
+                    >
+                      {uploadLoading ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span>Uploading to YouTube (Private)...</span>
+                        </>
+                      ) : (
+                        <>
+                          <UploadCloud className="w-4 h-4" />
+                          <span>Upload to YouTube (Private)</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </div>
               </div>
+            </section>
+          ) : (
+            <div className="bg-white border border-[#E5E5EA] rounded-2xl p-6 text-center space-y-2 opacity-65">
+              <div className="w-8 h-8 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center mx-auto">
+                <Lock className="w-4 h-4" />
+              </div>
+              <h3 className="text-xs font-bold text-[#1D1D1F]">Step 9 & 10 • Final Video Preview & YouTube Upload</h3>
+              <p className="text-[11px] text-[#6E6E73]">
+                🔒 Final video preview and YouTube distribution unlock once all 3D scenes finish rendering and assembling.
+              </p>
             </div>
-          </section>
+          )
         )}
 
         {/* Existing Projects List */}

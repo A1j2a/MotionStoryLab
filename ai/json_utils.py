@@ -27,15 +27,38 @@ def extract_and_repair_json(raw: str) -> Optional[Dict[str, Any]]:
     clean = re.sub(r"^```(?:json)?\s*", "", clean, flags=re.MULTILINE)
     clean = re.sub(r"```$", "", clean, flags=re.MULTILINE).strip()
 
-    # Step 3: Locate outermost JSON structure
-    first_brace = clean.find("{")
-    last_brace = clean.rfind("}")
-    if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
-        clean = clean[first_brace : last_brace + 1]
+    # Step 2.5: Try extracting from markdown ```json block if present
+    md_match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", clean)
+    if md_match:
+        try:
+            val = json.loads(md_match.group(1).strip(), strict=False)
+            if val:
+                return _normalize_result(val)
+        except Exception:
+            pass
 
-    # Attempt 1: Direct parse with non-strict mode (allows literal newlines/control chars inside strings)
+    # Step 3: Locate outermost JSON structure (whether object {...} or array [...])
+    first_brace = clean.find("{")
+    first_sq = clean.find("[")
+
+    if first_sq != -1 and (first_brace == -1 or first_sq < first_brace):
+        last_sq = clean.rfind("]")
+        if last_sq != -1 and last_sq > first_sq:
+            clean = clean[first_sq : last_sq + 1]
+    elif first_brace != -1:
+        last_brace = clean.rfind("}")
+        if last_brace != -1 and last_brace > first_brace:
+            clean = clean[first_brace : last_brace + 1]
+
+    def _normalize_result(val):
+        if isinstance(val, list):
+            return {"topics": val, "items": val, "scenes": val}
+        return val
+
+    # Attempt 1: Direct parse with non-strict mode
     try:
-        return json.loads(clean, strict=False)
+        res = json.loads(clean, strict=False)
+        return _normalize_result(res)
     except Exception:
         pass
 
@@ -45,7 +68,7 @@ def extract_and_repair_json(raw: str) -> Optional[Dict[str, Any]]:
     repaired = re.sub(r",\s*([\]}])", r"\1", repaired)
 
     try:
-        return json.loads(repaired, strict=False)
+        return _normalize_result(json.loads(repaired, strict=False))
     except Exception:
         pass
 
@@ -94,7 +117,7 @@ def extract_and_repair_json(raw: str) -> Optional[Dict[str, Any]]:
                 working += "]"
 
         working = re.sub(r",\s*([\]}])", r"\1", working)
-        return json.loads(working, strict=False)
+        return _normalize_result(json.loads(working, strict=False))
     except Exception as e:
         logger.debug(f"JSON repair attempt 3 failed: {e}")
 

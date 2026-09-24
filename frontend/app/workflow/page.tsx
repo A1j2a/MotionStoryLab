@@ -1,16 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { Header } from "@/components/Header";
 import { api } from "@/lib/api";
-import { HealthData } from "@/lib/types";
+import { HealthData, Project, Job } from "@/lib/types";
+import Link from "next/link";
 import {
   Sparkles,
   Cpu,
   Layers,
   Music,
   Film,
-  Share2,
   CheckCircle2,
   Clock,
   ArrowRight,
@@ -21,8 +21,6 @@ import {
   HardDrive,
   Sliders,
   ChevronRight,
-  Database,
-  Eye,
   Bot,
   Box,
   Volume2,
@@ -30,18 +28,42 @@ import {
   UploadCloud,
   Activity,
   Play,
+  Loader2,
+  Check,
+  Flame,
 } from "lucide-react";
+
+const ACTIVE_PROJ_KEY = "motionstory_active_project_id";
 
 export default function WorkflowEnginePage() {
   const [health, setHealth] = useState<HealthData | null>(null);
   const [loading, setLoading] = useState(false);
   const [selectedNode, setSelectedNode] = useState<string>("ollama");
+  const [activeProject, setActiveProject] = useState<Project | null>(null);
+  const [activeJob, setActiveJob] = useState<Job | null>(null);
 
-  const fetchHealth = async () => {
+  const fetchHealthAndProject = async () => {
     setLoading(true);
     try {
-      const data = await api.getHealth();
-      setHealth(data);
+      const h = await api.getHealth();
+      setHealth(h);
+
+      const activeId = localStorage.getItem(ACTIVE_PROJ_KEY);
+      if (activeId) {
+        const p = await api.getProject(activeId);
+        setActiveProject(p);
+        if (p && p.jobs && p.jobs.length > 0) {
+          setActiveJob(p.jobs[0]);
+        }
+      } else {
+        const list = await api.getProjects();
+        if (list && list.length > 0) {
+          setActiveProject(list[0]);
+          if (list[0].jobs && list[0].jobs.length > 0) {
+            setActiveJob(list[0].jobs[0]);
+          }
+        }
+      }
     } catch {
       // offline
     } finally {
@@ -50,37 +72,58 @@ export default function WorkflowEnginePage() {
   };
 
   useEffect(() => {
-    fetchHealth();
+    fetchHealthAndProject();
+    const interval = setInterval(fetchHealthAndProject, 4000);
+    return () => clearInterval(interval);
   }, []);
+
+  // Compute active stage (1 to 6) based on active project state
+  const computeActiveStage = (): number => {
+    if (!activeProject) return 1;
+    const s = activeProject.status;
+    const js = activeJob?.status || "";
+    const cs = activeJob?.current_step || "";
+
+    if (s === "READY" || s === "READY_FOR_REVIEW" || js === "READY_FOR_REVIEW" || cs === "READY_FOR_PREVIEW_AND_QC") return 6;
+    if (s === "COMPOSITING" || js === "ASSEMBLING" || cs === "FINAL_ASSEMBLY") return 5;
+    if (s === "RENDERING" || js === "SCENE_RENDERING" || cs.startsWith("RENDERED_SCENE")) return 4;
+    if (s === "AUDIO_GENERATION" || js === "AUDIO_GENERATION" || cs === "STORYBOARD_READY") return 3;
+    if (s === "CHARACTER_DESIGN" || cs === "CHARACTER_DESIGN") return 2;
+    return 1;
+  };
+
+  const currentStage = computeActiveStage();
 
   const PIPELINE_NODES = [
     {
       id: "ollama",
-      title: "Ollama Local AI",
-      subtitle: "Llama 3.2 (3B Metal Engine)",
+      stageNum: 1,
+      title: "OpenRouter / Local AI",
+      subtitle: "Story, Lyrics & Concept Engine",
       port: "http://127.0.0.1:11434",
       status: health?.ollama?.status === "connected" ? "connected" : "standby",
       icon: Bot,
-      role: "Story, Rhyming Lyrics & SEO Planner",
-      tech: "Meta Llama 3.2 via Ollama Metal GPU",
+      role: "Rhyming Lyrics & Preschool Storyboard Planner",
+      tech: "OpenRouter (Llama 3.3/Gemini) & Local Ollama Metal",
       color: "#FF6B00",
       inputs: [
-        "User Prompt (e.g. 'Wheels on the Yellow Bus')",
-        "Preschool Target Age (1-5 Toddler)",
-        "Video Duration (60s / 120s / 300s)",
+        "Preschool Theme (e.g., Yellow School Bus)",
+        "Target Age: 1-5 Years",
+        "Rhyme Meter: AABB Classic Preschool Rhyme Structure",
       ],
       outputs: [
-        "AABB Rhyming Stanzas (4 Verses)",
-        "Consistent 3D Character Bible JSON",
-        "High-CTR YouTube Title, Description & Tags",
+        "Structured Verses & Onomatopoeia Tags",
+        "Character Visual Bible JSON",
+        "High-CTR YouTube Title & Tags",
       ],
-      description: "Generates original sing-along lyrics with lively preschool onomatopoeia (beep beep, swish swish, moo moo) and structured 3D shot sequences. Runs 100% locally with zero cloud API costs.",
+      description: "Researches viral engagement signals, constructs sing-along rhymes with toddler repetitive cadence, and plans structured camera choreographies.",
       launchCmd: "ollama run llama3.2",
     },
     {
       id: "character_studio",
-      title: "3D Character & Asset Studio",
-      subtitle: "Procedural 3D & Diffusion",
+      stageNum: 2,
+      title: "3D Character Studio",
+      subtitle: "Procedural Geometry & Rigging",
       port: "Blender 5.2.2 / ComfyUI (8188)",
       status: "connected",
       icon: Box,
@@ -89,69 +132,70 @@ export default function WorkflowEnginePage() {
       color: "#3B82F6",
       inputs: [
         "Character Bible JSON",
-        "Theme (Bus, Star, Cow, Apple, Train)",
-        "Glossy Candy Material Palettes",
+        "Color Harmony Palette",
+        "Glossy Cartoon Material Settings",
       ],
       outputs: [
         "Procedural 3D Character Meshes",
-        "Expressive Cartoon Eyes with Highlights",
-        "Rolling Hills, Flower Meadow & Roads",
+        "Expressive Eyes with Reflections",
+        "Modular Stage Props (Beds, Clouds, Cars)",
       ],
-      description: "Dynamically constructs theme-matching 3D characters tailored to the topic (Yellow Bus, Twinkle Star, Daisy Cow, Happy Apple). No repetitive generic templates.",
+      description: "Constructs procedural 3D preschool character meshes tailored specifically to the project theme with smooth rounded geometry and vibrant candy hues.",
       launchCmd: "blender -b --python blender/render_scene.py",
     },
     {
       id: "audio_studio",
+      stageNum: 3,
       title: "Nursery Audio Orchestrator",
-      subtitle: "Kokoro TTS & Chime Synthesizer",
-      port: "Kokoro (8880) + Studio DSP",
+      subtitle: "Suno AI & Neural DSP Engine",
+      port: "Kokoro (8880) + Suno Audio Hub",
       status: health?.tts?.status === "connected" ? "connected" : "standby",
       icon: Volume2,
-      role: "Multi-Track Nursery Chime Arranger",
-      tech: "Stereo DSP, Glockenspiel & Reverb Engine",
+      role: "Multi-Track Music & Karaoke Sync",
+      tech: "Suno AI / Kokoro Neural Voice + FFmpeg DSP",
       color: "#10B981",
       inputs: [
-        "Rhyming Lyric Lines",
-        "120-128 BPM Swing Rhythm",
-        "Target Duration (Full 60s / 120s / 300s)",
+        "Formatted Lyric Stanzas ([Verse], [Chorus])",
+        "120-128 BPM Preschool Bounce Rhythm",
+        "Suno Style Prompt Package",
       ],
       outputs: [
-        "music.wav (Piano, Glockenspiel, Bass, Claps)",
-        "vocals.wav (Warm Narrator with Spatial Reverb)",
-        "master_soundtrack.wav (Balanced Final Mix)",
-        "subtitles.srt (Karaoke-synchronized SRT)",
+        "master_soundtrack.wav (Stereo Mix)",
+        "subtitles.srt (Karaoke Subtitles)",
+        "Exact Beat Timeline Alignment (ms)",
       ],
-      description: "Arranges multi-track preschool music with piano chords, glockenspiel top lead, upright bass, and toddler clap-alongs. Auto-generates exact duration audio matching the project setting.",
+      description: "Produces high-energy toddler sing-along tracks with balanced chime orchestration and generates millisecond-accurate karaoke SRT subtitle sync.",
       launchCmd: "docker run -p 8880:8880 ghcr.io/resemble-ai/kokoro-fastapi",
     },
     {
       id: "metal_render",
+      stageNum: 4,
       title: "Headless 3D Render Engine",
-      subtitle: "Blender EEVEE (Metal M4 GPU)",
+      subtitle: "Blender EEVEE (Metal GPU)",
       port: "/opt/homebrew/bin/blender",
       status: "connected",
       icon: Tv,
-      role: "Metal GPU Cinematics & Camera Tracks",
+      role: "Metal GPU Shot Cinematics",
       tech: "Apple Silicon Metal Acceleration",
       color: "#8B5CF6",
       inputs: [
-        "Shot Config JSON",
-        "Camera Choreography (Wide, Tracking, Hero, Close)",
-        "Pixar 3-Point Studio Lighting (Key, Rim, Fill)",
+        "Shot Sequence Timeline",
+        "Camera Choreography (Wide, Close, Orbit, Tracking)",
+        "Pixar 3-Point Studio Soft Lighting",
       ],
       outputs: [
-        "scene_001.mp4 (Establishing Wide Pan)",
-        "scene_002.mp4 (Low-Angle Action Track)",
-        "scene_003.mp4 (High 3/4 Landscape Beauty)",
-        "scene_004.mp4 (Portrait Zoom & Happy Wave)",
+        "scene_001.mp4 (Establishing Panoramic Shot)",
+        "scene_002.mp4 (Dynamic Action Track)",
+        "scene_003.mp4 (Hero Character Smile & Wave)",
       ],
-      description: "Renders 1280x720 24fps frames headlessly using Apple Silicon M4 Metal shaders (~50s per 5s shot) with distinct camera movements for each scene to prevent repetitive visual flags.",
+      description: "Renders 1280x720 24fps frames headlessly using Apple Silicon M4 Metal GPU shaders with distinct camera choreography for each musical phrase.",
       launchCmd: "blender -b --python blender/render_scene.py -- scene_config.json",
     },
     {
       id: "ffmpeg_master",
+      stageNum: 5,
       title: "Master AV Compositor",
-      subtitle: "FFmpeg 7.1 Multi-Filter Engine",
+      subtitle: "FFmpeg 7.1 Multi-Track Engine",
       port: "/opt/homebrew/bin/ffmpeg",
       status: "connected",
       icon: Film,
@@ -159,37 +203,38 @@ export default function WorkflowEnginePage() {
       tech: "FFmpeg libx264, AAC & ASS Subtitle Filter",
       color: "#EC4899",
       inputs: [
-        "Rendered 3D Scene Clips",
+        "Rendered 3D Scene Clips (MP4)",
         "master_soundtrack.wav (Stereo 44.1kHz)",
         "subtitles.srt (Karaoke Timestamps)",
       ],
       outputs: [
-        "final.mp4 (Broadcast 720p/1080p MP4)",
-        "thumbnail.jpg (Auto-extracted Video Cover)",
+        "final.mp4 (Broadcast 720p/1080p Video)",
+        "thumbnail.jpg (High-CTR 3D Video Cover)",
       ],
-      description: "Sequences all camera shots across the full project duration, burns stylized drop-shadow subtitles for toddler mobile screens, and multiplexes stereo audio with instant web streaming flags.",
+      description: "Sequences all camera shots, burns drop-shadow toddler subtitles, balances audio gain, and compiles broadcast-ready final MP4.",
       launchCmd: "ffmpeg -y -i scenes -i master.wav -c:v libx264 final.mp4",
     },
     {
       id: "n8n_youtube",
-      title: "n8n Workflow & YouTube Growth",
-      subtitle: "Automated Batching & Studio Upload",
+      stageNum: 6,
+      title: "Distribution & Quality Control",
+      subtitle: "QC Guard & YouTube Upload",
       port: "http://127.0.0.1:5678",
       status: health?.n8n?.status === "connected" ? "connected" : "standby",
       icon: UploadCloud,
-      role: "YouTube Distribution & Batch Engine",
-      tech: "n8n Node Workflows & YouTube Data API v3",
+      role: "QC Audio/Video Audit & YouTube Release",
+      tech: "Automated QC Engine & YouTube Data API v3",
       color: "#F59E0B",
       inputs: [
         "final.mp4 & thumbnail.jpg",
         "High-CTR SEO Metadata JSON",
-        "Target Publishing Schedule",
+        "Strict Private Review Privacy Flag",
       ],
       outputs: [
-        "YouTube Studio Upload with Chapters & Tags",
-        "Automated Daily Video Batch Generation",
+        "Quality Control Pass Certificate",
+        "YouTube Studio Private Upload with SEO Tags",
       ],
-      description: "Automates scheduled video creation batches, prepares COPPA kid-directed metadata, and uploads finished videos directly to YouTube Studio without manual clicking.",
+      description: "Runs automated verification on audio loudness and black frames, and publishes directly to YouTube in creator private review mode.",
       launchCmd: "npx n8n start --port 5678",
     },
   ];
@@ -198,335 +243,275 @@ export default function WorkflowEnginePage() {
 
   return (
     <>
+      <style jsx global>{`
+        @keyframes workflowDash {
+          from { stroke-dashoffset: 36; }
+          to { stroke-dashoffset: 0; }
+        }
+        .animate-workflow-line {
+          stroke-dasharray: 8 6;
+          animation: workflowDash 1.2s linear infinite;
+        }
+        .idle-workflow-line {
+          stroke-dasharray: 4 4;
+        }
+      `}</style>
+
       <Header
         title="Live Engine Workflow Architecture"
-        subtitle="Visual interactive schematic of local AI planning, procedural 3D synthesis, and GPU rendering"
+        subtitle="Visual interactive schematic of local AI planning, procedural 3D synthesis, and real-time GPU pipelines"
       />
 
       <main className="p-8 space-y-8 flex-1 max-w-7xl mx-auto w-full">
-        {/* Top Control Bar */}
+        {/* Top Live Engine & Active Project Monitor */}
         <div className="bg-white border border-[#E5E5EA] p-5 rounded-2xl shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-3.5">
-            <div className="w-10 h-10 rounded-xl bg-[#FFF7ED] border border-[#FED7AA] flex items-center justify-center text-[#EA580C]">
+            <div className="w-11 h-11 rounded-2xl bg-[#FFF7ED] border border-[#FED7AA] flex items-center justify-center text-[#EA580C] shadow-xs">
               <Activity className="w-5 h-5 animate-pulse" />
             </div>
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-base font-bold text-[#1D1D1F]">
-                  MotionStoryLabs Studio Core Schematic
+                  Live Engine Pipeline Monitor
                 </h2>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-200">
-                  LIVE ENGINE
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-200 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping"></span>
+                  LIVE ENGINE ACTIVE
                 </span>
               </div>
-              <p className="text-xs text-[#6E6E73]">
-                Zero-cloud local pipeline: Ollama (Metal) ➔ Blender 3D (EEVEE) ➔ DSP Audio ➔ FFmpeg ➔ YouTube Growth
+              <p className="text-xs text-[#6E6E73] mt-0.5">
+                {activeProject ? (
+                  <span>
+                    Current Production: <strong className="text-[#1D1D1F]">&ldquo;{activeProject.title}&rdquo;</strong> • Step: <span className="text-[#EA580C] font-semibold">{activeJob?.current_step || activeProject.status}</span>
+                  </span>
+                ) : (
+                  <span>No active production running. Pick a topic on Dashboard to start the engine flow.</span>
+                )}
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5">
+            {activeProject && (
+              <Link
+                href="/"
+                className="inline-flex items-center gap-1.5 bg-gradient-to-r from-[#FF6B00] to-[#EA580C] hover:opacity-95 text-white text-xs font-bold px-4 py-2 rounded-xl shadow-xs transition-all"
+              >
+                <span>Open Dashboard</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </Link>
+            )}
             <button
-              onClick={fetchHealth}
+              onClick={fetchHealthAndProject}
               disabled={loading}
-              className="inline-flex items-center gap-2 bg-[#F5F5F7] hover:bg-[#E5E5EA] text-[#1D1D1F] border border-[#E5E5EA] text-xs font-semibold px-4 py-2 rounded-xl transition-all cursor-pointer"
+              className="inline-flex items-center gap-1.5 bg-[#F5F5F7] hover:bg-[#E5E5EA] text-[#1D1D1F] border border-[#E5E5EA] text-xs font-semibold px-3.5 py-2 rounded-xl transition-all cursor-pointer"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin text-[#FF6B00]" : ""}`} />
-              <span>Ping All Nodes</span>
+              <span>Ping Nodes</span>
             </button>
           </div>
         </div>
 
         {/* ============================================================== */}
-        {/* INTERACTIVE VISUAL PIPELINE SCHEMATIC (FLOW DIAGRAM) */}
+        {/* DYNAMIC PIPELINE SCHEMATIC (WITH ANIMATED WORKFLOW CONDUITS) */}
         {/* ============================================================== */}
-        <div className="bg-white border border-[#E5E5EA] rounded-2xl p-7 shadow-xs relative overflow-hidden">
-          <div className="flex items-center justify-between mb-6">
+        <div className="bg-white border border-[#E5E5EA] rounded-3xl p-7 shadow-xs relative overflow-hidden space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="flex items-center gap-2 text-xs font-bold text-[#1D1D1F] uppercase tracking-wider">
               <Zap className="w-4 h-4 text-[#FF6B00]" />
-              <span>Live Interactive Node Conduits (Click any node to inspect)</span>
+              <span>Interactive Pipeline Conduits • Live Stage Highlighting</span>
             </div>
-            <span className="text-xs text-[#86868B] font-mono">
-              Architecture: Apple Silicon M4 / M2 Unified Pipeline
-            </span>
+            <div className="flex items-center gap-3 text-xs">
+              <div className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                <span className="text-[11px] text-[#6E6E73]">Completed</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-orange-500 animate-ping"></span>
+                <span className="text-[11px] font-bold text-orange-600">Active Flow</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-slate-300"></span>
+                <span className="text-[11px] text-[#86868B]">Standby</span>
+              </div>
+            </div>
           </div>
 
-          {/* Node Grid Layout */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 relative z-10">
-            {/* ROW 1: Stage 1, 2, 3 */}
-            {PIPELINE_NODES.slice(0, 3).map((node, i) => {
-              const isSelected = selectedNode === node.id;
-              const Icon = node.icon;
-              return (
-                <div
-                  key={node.id}
-                  onClick={() => setSelectedNode(node.id)}
-                  className={`p-5 rounded-2xl border transition-all cursor-pointer relative bg-white ${
-                    isSelected
-                      ? "border-[#FF6B00] shadow-lg shadow-orange-500/10 ring-2 ring-[#FF6B00]/25 translate-y-[-2px]"
-                      : "border-[#E5E5EA] hover:border-[#D1D1D6] hover:shadow-xs"
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-3">
-                    <div
-                      className="w-10 h-10 rounded-xl flex items-center justify-center shadow-xs"
-                      style={{ backgroundColor: `${node.color}15`, color: node.color }}
-                    >
-                      <Icon className="w-5 h-5" />
+          {/* SVG Animated Connector Graphic between Row 1 and Row 2 */}
+          <div className="relative">
+            {/* Grid of 6 Nodes */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 relative z-10">
+              {PIPELINE_NODES.map((node) => {
+                const isSelected = selectedNode === node.id;
+                const isCurrentActive = currentStage === node.stageNum;
+                const isFinished = currentStage > node.stageNum;
+                const Icon = node.icon;
+
+                return (
+                  <div
+                    key={node.id}
+                    onClick={() => setSelectedNode(node.id)}
+                    className={`p-5 rounded-2xl border transition-all cursor-pointer relative bg-white ${
+                      isCurrentActive
+                        ? "border-[#FF6B00] ring-4 ring-orange-500/20 shadow-lg shadow-orange-500/10 scale-[1.02]"
+                        : isFinished
+                        ? "border-emerald-300 bg-emerald-50/15 hover:shadow-xs"
+                        : isSelected
+                        ? "border-blue-500 ring-2 ring-blue-500/20 shadow-xs"
+                        : "border-[#E5E5EA] hover:border-[#D1D1D6] hover:shadow-xs"
+                    }`}
+                  >
+                    {/* Active Pulsing Ribbon */}
+                    {isCurrentActive && (
+                      <div className="absolute -top-3 left-4 bg-gradient-to-r from-[#FF6B00] to-[#EA580C] text-white text-[9px] font-extrabold uppercase px-2.5 py-0.5 rounded-full shadow-xs flex items-center gap-1">
+                        <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                        <span>CURRENT ACTIVE STAGE</span>
+                      </div>
+                    )}
+
+                    <div className="flex items-center justify-between mb-3 mt-1">
+                      <div
+                        className="w-10 h-10 rounded-xl flex items-center justify-center shadow-xs"
+                        style={{ backgroundColor: `${node.color}15`, color: node.color }}
+                      >
+                        <Icon className="w-5 h-5" />
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        {isFinished ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                            <Check className="w-3 h-3" />
+                            <span>DONE</span>
+                          </span>
+                        ) : isCurrentActive ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-orange-100 text-orange-800 animate-pulse">
+                            <span className="w-1.5 h-1.5 rounded-full bg-orange-600 animate-ping"></span>
+                            <span>PROCESSING</span>
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-semibold text-[#86868B] font-mono bg-slate-100 px-2 py-0.5 rounded-full">
+                            STANDBY
+                          </span>
+                        )}
+                      </div>
                     </div>
-                    <div className="flex items-center gap-1.5">
-                      <span
-                        className={`w-2 h-2 rounded-full ${
-                          node.status === "connected" ? "bg-emerald-500" : "bg-amber-400"
-                        }`}
-                      />
-                      <span className="text-[10px] font-semibold text-[#86868B] font-mono">
-                        {node.status === "connected" ? "ONLINE" : "STANDBY"}
+
+                    <span className="text-[10px] font-mono font-bold text-[#FF6B00] block mb-1">
+                      STAGE 0{node.stageNum}
+                    </span>
+                    <h3 className="text-sm font-bold text-[#1D1D1F] leading-tight">
+                      {node.title}
+                    </h3>
+                    <p className="text-xs text-[#6E6E73] mt-1 font-medium line-clamp-1">
+                      {node.role}
+                    </p>
+
+                    <div className="pt-3 mt-3 border-t border-[#F5F5F7] flex items-center justify-between text-[11px] text-[#86868B]">
+                      <span className="truncate max-w-[140px] font-mono text-[10px]">
+                        {node.port}
+                      </span>
+                      <span className="text-[#FF6B00] font-semibold flex items-center gap-1">
+                        Inspect <ChevronRight className="w-3 h-3" />
                       </span>
                     </div>
                   </div>
-
-                  <span className="text-[10px] font-mono font-bold text-[#FF6B00] block mb-1">
-                    STAGE 0{i + 1}
-                  </span>
-                  <h3 className="text-sm font-bold text-[#1D1D1F] leading-tight">
-                    {node.title}
-                  </h3>
-                  <p className="text-xs text-[#6E6E73] mt-1 font-medium line-clamp-1">
-                    {node.role}
-                  </p>
-
-                  <div className="pt-3 mt-3 border-t border-[#F5F5F7] flex items-center justify-between text-[11px] text-[#86868B]">
-                    <span className="truncate max-w-[140px] font-mono text-[10px]">
-                      {node.port}
-                    </span>
-                    <span className="text-[#FF6B00] font-semibold flex items-center gap-1">
-                      Inspect <ChevronRight className="w-3 h-3" />
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
-
-            {/* ROW 2: Stage 4, 5, 6 */}
-            {PIPELINE_NODES.slice(3, 6).map((node, i) => {
-              const isSelected = selectedNode === node.id;
-              const Icon = node.icon;
-              return (
-                <div
-                  key={node.id}
-                  onClick={() => setSelectedNode(node.id)}
-                  className={`p-5 rounded-2xl border transition-all cursor-pointer relative bg-white ${
-                    isSelected
-                      ? "border-[#FF6B00] shadow-lg shadow-orange-500/10 ring-2 ring-[#FF6B00]/25 translate-y-[-2px]"
-                      : "border-[#E5E5EA] hover:border-[#D1D1D6] hover:shadow-xs"
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-3">
-                    <div
-                      className="w-10 h-10 rounded-xl flex items-center justify-center shadow-xs"
-                      style={{ backgroundColor: `${node.color}15`, color: node.color }}
-                    >
-                      <Icon className="w-5 h-5" />
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <span
-                        className={`w-2 h-2 rounded-full ${
-                          node.status === "connected" ? "bg-emerald-500" : "bg-amber-400"
-                        }`}
-                      />
-                      <span className="text-[10px] font-semibold text-[#86868B] font-mono">
-                        {node.status === "connected" ? "ONLINE" : "STANDBY"}
-                      </span>
-                    </div>
-                  </div>
-
-                  <span className="text-[10px] font-mono font-bold text-[#FF6B00] block mb-1">
-                    STAGE 0{i + 4}
-                  </span>
-                  <h3 className="text-sm font-bold text-[#1D1D1F] leading-tight">
-                    {node.title}
-                  </h3>
-                  <p className="text-xs text-[#6E6E73] mt-1 font-medium line-clamp-1">
-                    {node.role}
-                  </p>
-
-                  <div className="pt-3 mt-3 border-t border-[#F5F5F7] flex items-center justify-between text-[11px] text-[#86868B]">
-                    <span className="truncate max-w-[140px] font-mono text-[10px]">
-                      {node.port}
-                    </span>
-                    <span className="text-[#FF6B00] font-semibold flex items-center gap-1">
-                      Inspect <ChevronRight className="w-3 h-3" />
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
 
-          {/* Animated Conduit Graphic Banner */}
-          <div className="mt-6 pt-6 border-t border-[#E5E5EA] flex items-center justify-between text-xs text-[#6E6E73] bg-[#FAFAFC] -mx-7 -mb-7 p-4 px-7">
+          {/* Animated Conduit Status Bar */}
+          <div className="mt-6 pt-5 border-t border-[#E5E5EA] flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-[#6E6E73] bg-[#FAFAFC] -mx-7 -mb-7 p-4 px-7">
             <div className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping" />
               <span className="font-semibold text-[#1D1D1F]">
-                Data Pipeline Conduit Active:
+                Continuous Signal Flow:
               </span>
-              <span>Ollama Script ➔ 3D Mesh Gen ➔ Stereo DSP ➔ EEVEE Metal Frames ➔ FFmpeg MP4</span>
+              <span className="text-[11px]">
+                Stage 01 (Topics/Lyrics) ➔ Stage 02 (3D Characters) ➔ Stage 03 (Suno Audio) ➔ Stage 04 (Blender GPU) ➔ Stage 05 (FFmpeg) ➔ Stage 06 (YouTube)
+              </span>
             </div>
             <span className="font-mono text-[11px] text-[#86868B]">
-              Latency: ~2.5s LLM • ~50s/Shot 3D Render
+              Pipeline: Zero-Cloud Apple Silicon M4 Local Stack
             </span>
           </div>
         </div>
 
-        {/* ============================================================== */}
-        {/* ACTIVE NODE DEEP DIVE INSPECTOR */}
-        {/* ============================================================== */}
-        <div className="bg-white border border-[#E5E5EA] rounded-2xl p-7 shadow-xs space-y-6">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 border-b border-[#E5E5EA]">
+        {/* Selected Node Detailed Inspector */}
+        <div className="bg-white border border-[#E5E5EA] rounded-2xl p-6 shadow-xs space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#E5E5EA]">
             <div className="flex items-center gap-3.5">
               <div
-                className="w-12 h-12 rounded-2xl flex items-center justify-center font-bold text-lg shadow-sm"
+                className="w-11 h-11 rounded-xl flex items-center justify-center shadow-xs"
                 style={{ backgroundColor: `${activeNode.color}15`, color: activeNode.color }}
               >
                 <activeNode.icon className="w-6 h-6" />
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <h3 className="text-lg font-bold text-[#1D1D1F]">
-                    {activeNode.title}
-                  </h3>
-                  <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-[#F5F5F7] text-[#1D1D1F] border border-[#E5E5EA]">
-                    {activeNode.subtitle}
+                  <h3 className="text-base font-bold text-[#1D1D1F]">{activeNode.title}</h3>
+                  <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-[#FFF7ED] text-[#C2410C] border border-[#FED7AA]">
+                    STAGE 0{activeNode.stageNum}
                   </span>
                 </div>
-                <p className="text-xs text-[#6E6E73] mt-0.5 max-w-2xl">
-                  {activeNode.description}
-                </p>
+                <p className="text-xs text-[#6E6E73]">{activeNode.subtitle}</p>
               </div>
             </div>
 
-            <div className="flex items-center gap-3">
-              <div className="text-right">
-                <span className="text-[10px] text-[#86868B] uppercase font-bold block">
-                  Service Endpoint
-                </span>
-                <span className="text-xs font-mono font-medium text-[#1D1D1F]">
-                  {activeNode.port}
-                </span>
-              </div>
-              <span
-                className={`inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-xl ${
-                  activeNode.status === "connected"
-                    ? "bg-emerald-50 text-emerald-600 border border-emerald-200"
-                    : "bg-amber-50 text-amber-700 border border-amber-200"
-                }`}
-              >
-                <span
-                  className={`w-2 h-2 rounded-full ${
-                    activeNode.status === "connected" ? "bg-emerald-500" : "bg-amber-500"
-                  }`}
-                />
-                <span>{activeNode.status === "connected" ? "Connected" : "Standby / Fallback Ready"}</span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-mono font-semibold px-3 py-1 rounded-xl bg-[#F5F5F7] border border-[#E5E5EA] text-[#1D1D1F]">
+                Endpoint: {activeNode.port}
               </span>
             </div>
           </div>
 
-          {/* Inputs & Outputs Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Inputs Box */}
-            <div className="bg-[#FAFAFC] border border-[#E5E5EA] rounded-xl p-5 space-y-3">
-              <div className="flex items-center gap-2 text-[#EA580C]">
-                <Sliders className="w-4 h-4" />
-                <h4 className="text-xs font-bold uppercase tracking-wider">
-                  Inputs & Parameters Consumed
-                </h4>
-              </div>
+            {/* Left: Functional Specs & Architecture */}
+            <div className="space-y-4">
+              <h4 className="text-xs font-bold text-[#1D1D1F] uppercase tracking-wider">
+                Engine Architectural Role
+              </h4>
+              <p className="text-xs text-[#6E6E73] leading-relaxed bg-[#FAFAFC] border border-[#E5E5EA] p-4 rounded-xl font-medium">
+                {activeNode.description}
+              </p>
+
               <div className="space-y-2">
-                {activeNode.inputs.map((inp, idx) => (
-                  <div
-                    key={idx}
-                    className="bg-white p-3 rounded-lg border border-[#E5E5EA] text-xs font-medium text-[#1D1D1F] flex items-center gap-2"
-                  >
-                    <ArrowRight className="w-3.5 h-3.5 text-[#FF6B00] flex-shrink-0" />
-                    <span>{inp}</span>
-                  </div>
-                ))}
+                <span className="text-[11px] font-bold text-[#1D1D1F] block">Direct Daemon Command</span>
+                <div className="bg-[#1D1D1F] text-emerald-400 font-mono text-xs p-3 rounded-xl flex items-center justify-between">
+                  <span className="truncate">$ {activeNode.launchCmd}</span>
+                  <Terminal className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                </div>
               </div>
             </div>
 
-            {/* Outputs Box */}
-            <div className="bg-[#FAFAFC] border border-[#E5E5EA] rounded-xl p-5 space-y-3">
-              <div className="flex items-center gap-2 text-[#10B981]">
-                <CheckCircle2 className="w-4 h-4" />
-                <h4 className="text-xs font-bold uppercase tracking-wider">
-                  Outputs & Deliverable Artifacts
-                </h4>
+            {/* Right: Inputs & Outputs Data Contracts */}
+            <div className="space-y-4">
+              <h4 className="text-xs font-bold text-[#1D1D1F] uppercase tracking-wider">
+                Pipeline Data Contracts (I/O)
+              </h4>
+
+              <div className="space-y-3">
+                <div className="bg-[#FAFAFC] border border-[#E5E5EA] p-3.5 rounded-xl space-y-1.5">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-[#FF6B00] block">
+                    Inbound Input Stream
+                  </span>
+                  <ul className="text-xs text-[#6E6E73] space-y-1 list-disc list-inside">
+                    {activeNode.inputs.map((inp, idx) => (
+                      <li key={idx}>{inp}</li>
+                    ))}
+                  </ul>
+                </div>
+
+                <div className="bg-[#FAFAFC] border border-[#E5E5EA] p-3.5 rounded-xl space-y-1.5">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 block">
+                    Outbound Generated Artifacts
+                  </span>
+                  <ul className="text-xs text-[#6E6E73] space-y-1 list-disc list-inside">
+                    {activeNode.outputs.map((out, idx) => (
+                      <li key={idx}>{out}</li>
+                    ))}
+                  </ul>
+                </div>
               </div>
-              <div className="space-y-2">
-                {activeNode.outputs.map((out, idx) => (
-                  <div
-                    key={idx}
-                    className="bg-white p-3 rounded-lg border border-[#E5E5EA] text-xs font-medium text-[#1D1D1F] flex items-center gap-2"
-                  >
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" />
-                    <span>{out}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Quick CLI Execution Box */}
-          <div className="bg-[#1C1C1E] border border-[#2C2C2E] rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-3 text-white">
-            <div className="flex items-center gap-2.5 font-mono text-xs text-[#A1A1A6]">
-              <Terminal className="w-4 h-4 text-[#FF6B00]" />
-              <span>Native Command:</span>
-              <code className="text-[#FF8A3D] bg-[#2C2C2E] px-2.5 py-1 rounded-md">
-                {activeNode.launchCmd}
-              </code>
-            </div>
-            <span className="text-[11px] text-[#86868B]">
-              Optimized for Apple Silicon Metal & Unified Memory
-            </span>
-          </div>
-        </div>
-
-        {/* Architecture Specs Bottom Banner */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="bg-white border border-[#E5E5EA] rounded-2xl p-5 shadow-xs flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-[#FFF7ED] text-[#FF6B00] flex items-center justify-center">
-              <Bot className="w-5 h-5" />
-            </div>
-            <div>
-              <h4 className="text-xs font-bold text-[#1D1D1F]">Local AI Autonomy</h4>
-              <p className="text-[11px] text-[#86868B]">
-                Runs 100% locally on Ollama without cloud tokens or recurring API costs.
-              </p>
-            </div>
-          </div>
-
-          <div className="bg-white border border-[#E5E5EA] rounded-2xl p-5 shadow-xs flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-[#FFF7ED] text-[#FF6B00] flex items-center justify-center">
-              <HardDrive className="w-5 h-5" />
-            </div>
-            <div>
-              <h4 className="text-xs font-bold text-[#1D1D1F]">Unified Memory Protection</h4>
-              <p className="text-[11px] text-[#86868B]">
-                Sequential stage execution prevents memory leaks and protects 16GB RAM.
-              </p>
-            </div>
-          </div>
-
-          <div className="bg-white border border-[#E5E5EA] rounded-2xl p-5 shadow-xs flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-[#FFF7ED] text-[#FF6B00] flex items-center justify-center">
-              <Share2 className="w-5 h-5" />
-            </div>
-            <div>
-              <h4 className="text-xs font-bold text-[#1D1D1F]">YouTube Content ID Safe</h4>
-              <p className="text-[11px] text-[#86868B]">
-                Unique procedural assets & chords avoid "reused AI content" copyright flags.
-              </p>
             </div>
           </div>
         </div>

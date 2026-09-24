@@ -35,6 +35,7 @@ export interface TopicOpportunity {
   suggested_title: string;
   category: string;
   target_age: string;
+  duration?: string;
   search_keywords: string[];
   content_angle: string;
   why_worth_considering: string;
@@ -129,6 +130,7 @@ export interface StrictScene {
   duration: number;
   end_time: number;
   lyrics?: string;
+  video_prompt?: string;
   characters: any[];
   environment: any;
   actions: string[];
@@ -184,6 +186,7 @@ export interface Project {
   video_type: string;
   visual_style: string;
   target_age: string;
+  duration?: string;
   language: string;
   metadata_json?: Record<string, any> | null;
   created_at: string;
@@ -238,6 +241,7 @@ export interface Scene {
   lighting?: Record<string, any> | null;
   dialogue?: string | null;
   lyrics?: string | null;
+  video_prompt?: string | null;
   music?: string | null;
   sound_effects?: string[];
   transition?: string | null;
@@ -310,6 +314,40 @@ export interface AISettings {
   openrouter_model: string;
   active_provider: string;
   available_models: AIModelOption[];
+
+  // Video Settings
+  openrouter_video_enabled: boolean;
+  openrouter_video_model: string;
+  video_aspect_ratio: string;
+  available_video_models: AIModelOption[];
+
+  // Thumbnail Settings
+  thumbnail_generator_enabled: boolean;
+  thumbnail_engine: string;
+  thumbnail_model: string;
+  thumbnail_aspect_ratio: string;
+  available_thumbnail_models: AIModelOption[];
+
+  // Audio & Suno Mode Settings
+  auto_song_generation_enabled: boolean;
+}
+
+export interface TestVideoResult {
+  success: boolean;
+  job_id?: string;
+  polling_url?: string;
+  model: string;
+  aspect_ratio: string;
+  latency_ms: number;
+  message: string;
+}
+
+export interface TestThumbnailResult {
+  success: boolean;
+  model: string;
+  aspect_ratio: string;
+  message: string;
+  file_size: number;
 }
 
 export interface TestConnectionResult {
@@ -329,4 +367,15 @@ export interface ServiceToolItem {
   log_file: string;
   description: string;
   can_toggle: boolean;
+}
+
+export interface SunoPromptPackage {
+  project_id: string;
+  title: string;
+  topic: string;
+  style_prompt: string;
+  suno_title: string;
+  suno_lyrics: string;
+  suno_url: string;
+  instructions: string;
 }

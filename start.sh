@@ -110,6 +110,7 @@ if lsof -Pi :${BACKEND_PORT} -sTCP:LISTEN -t >/dev/null 2>&1; then
 else
     nohup "${PYTHON_BIN}" -m uvicorn app.main:app --app-dir "${SCRIPT_DIR}/backend" --host "${BACKEND_HOST}" --port "${BACKEND_PORT}" > "${SCRIPT_DIR}/logs/app.log" 2>&1 &
     BACKEND_PID=$!
+    disown ${BACKEND_PID} 2>/dev/null || true
     echo ${BACKEND_PID} > "${PID_DIR}/backend.pid"
     echo "  ✓ Backend started (PID: ${BACKEND_PID})"
 fi

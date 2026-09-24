@@ -154,3 +154,116 @@ def generate_thumbnail(video_path: str, output_thumbnail_path: str) -> str:
         subprocess.run(cmd, capture_output=True, text=True)
 
     return output_thumbnail_path
+
+
+def generate_high_ctr_thumbnail(
+    title: str = "Kids Nursery Rhyme",
+    topic: str = "Preschool Song",
+    output_thumbnail_path: str = "thumbnail.jpg",
+    video_path: Optional[str] = None,
+    aspect_ratio: str = "16:9",
+    character_name: str = "Hero",
+) -> str:
+    """
+    Generates an ultra-high CTR / high-CPM YouTube Kids thumbnail.
+    Combines video frame (or vibrant 3D Pixar gradient), bold multi-layer 3D typography,
+    eye-catching badges ('NEW EPISODE', 'SING ALONG'), and saturated nursery color palette.
+    Supports 16:9 (1280x720) and 9:16 (1080x1920).
+    """
+    from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance
+
+    os.makedirs(os.path.dirname(os.path.abspath(output_thumbnail_path)), exist_ok=True)
+    is_vertical = (aspect_ratio == "9:16")
+    width, height = (1080, 1920) if is_vertical else (1280, 720)
+
+    # 1. Base Image: Try extracting frame from video if present
+    base_img = None
+    if video_path and os.path.exists(video_path) and os.path.getsize(video_path) > 1000:
+        temp_frame = output_thumbnail_path + ".raw.jpg"
+        try:
+            generate_thumbnail(video_path, temp_frame)
+            if os.path.exists(temp_frame) and os.path.getsize(temp_frame) > 1000:
+                raw_im = Image.open(temp_frame).convert("RGB")
+                base_img = raw_im.resize((width, height), Image.Resampling.LANCZOS)
+                # Boost saturation & contrast for High-CTR YouTube Kids standard
+                enhancer = ImageEnhance.Color(base_img)
+                base_img = enhancer.enhance(1.35)
+                bright_enh = ImageEnhance.Brightness(base_img)
+                base_img = bright_enh.enhance(1.08)
+                os.remove(temp_frame)
+        except Exception:
+            pass
+
+    # 2. If no video frame, create vibrant Pixar sunset / rainbow gradient canvas
+    if base_img is None:
+        base_img = Image.new("RGB", (width, height), "#1E1B4B")
+        draw_grad = ImageDraw.Draw(base_img)
+        for y in range(height):
+            ratio = y / height
+            r = int(255 * (1 - ratio * 0.4))
+            g = int(140 * (1 - ratio * 0.3) + 70 * ratio)
+            b = int(50 * (1 - ratio) + 220 * ratio)
+            draw_grad.line([(0, y), (width, y)], fill=(r, g, b))
+
+        # Add decorative bright playful circles
+        draw_grad.ellipse([int(width * 0.7), int(height * 0.05), int(width * 0.98), int(height * 0.45)], fill="#FDE047", outline="#F59E0B", width=8)
+        draw_grad.ellipse([int(width * 0.05), int(height * 0.6), int(width * 0.45), int(height * 1.1)], fill="#10B981", outline="#059669", width=8)
+        draw_grad.ellipse([int(width * 0.4), int(height * 0.7), int(width * 0.95), int(height * 1.2)], fill="#3B82F6", outline="#2563EB", width=8)
+
+    draw = ImageDraw.Draw(base_img, "RGBA")
+
+    # 3. High-CTR Glowing Vignette Border
+    border_w = 16 if not is_vertical else 24
+    for i in range(border_w):
+        alpha = int(220 * (1 - i / border_w))
+        draw.rectangle([i, i, width - i, height - i], outline=(255, 220, 0, alpha), width=1)
+
+    # 4. Top-Left High-CPM Badge ('★ POPULAR KIDS SONG ★' or '🔥 NEW EPISODE')
+    badge_w = 340 if not is_vertical else 420
+    badge_h = 56 if not is_vertical else 72
+    badge_x = 36
+    badge_y = 36
+    draw.rounded_rectangle([badge_x, badge_y, badge_x + badge_w, badge_y + badge_h], radius=18, fill=(239, 68, 68, 245), outline=(255, 255, 255, 255), width=4)
+
+    # Text overlay
+    badge_text = "🔥 NEW PRESCHOOL HIT!"
+    draw.text((badge_x + 24, badge_y + 12), badge_text, fill="#FFFFFF")
+
+    # Top-Right Badge ('4K ULTRA HD')
+    tr_w = 180 if not is_vertical else 220
+    tr_x = width - tr_w - 36
+    draw.rounded_rectangle([tr_x, badge_y, tr_x + tr_w, badge_y + badge_h], radius=18, fill=(37, 99, 235, 245), outline=(255, 255, 255, 255), width=4)
+    draw.text((tr_x + 28, badge_y + 12), "⭐ 4K KIDS", fill="#FFFFFF")
+
+    # 5. Bold 3D Multi-Layered Title Banner (Bottom Hook for High Click-Through Rate)
+    clean_title = title.split(":")[0].strip() if ":" in title else title.strip()
+    if len(clean_title) > 32:
+        clean_title = clean_title[:30] + "..."
+
+    banner_h = int(height * 0.28)
+    banner_y = height - banner_h - 28
+    banner_x1 = 28
+    banner_x2 = width - 28
+
+    # Dark translucent backdrop for maximum text readability
+    draw.rounded_rectangle([banner_x1, banner_y, banner_x2, banner_y + banner_h], radius=24, fill=(15, 23, 42, 215), outline=(250, 204, 21, 255), width=6)
+
+    # Draw Title with 3D drop shadow effect
+    text_x = banner_x1 + 32
+    text_y = banner_y + 24
+
+    # Subtitle hook
+    hook_text = f"Sing Along with {character_name}! 🎈"
+    draw.text((text_x, text_y), hook_text, fill="#38BDF8")
+
+    # Main Headline in Big 3D Yellow / White
+    headline = clean_title.upper()
+    for offset_x, offset_y in [(4, 4), (3, 3), (2, 2), (-2, -2), (2, -2), (-2, 2)]:
+        draw.text((text_x + offset_x, text_y + 42 + offset_y), headline, fill="#000000")
+
+    draw.text((text_x, text_y + 42), headline, fill="#FDE047")
+
+    # Save final thumbnail JPEG
+    base_img = base_img.convert("RGB")
+    base_img.save(output_thumbnail_path, format="JPEG", quality=94, optimize=True)
+    return output_thumbnail_path

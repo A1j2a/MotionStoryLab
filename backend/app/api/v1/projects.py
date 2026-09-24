@@ -4,6 +4,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query, status, BackgroundTasks
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from app.api.deps import get_db_session
 from app.models.project import Project
@@ -233,3 +234,66 @@ async def delete_project(
             detail=f"Project with ID '{project_id}' not found",
         )
     return None
+
+from pydantic import BaseModel
+
+class GenerateThumbnailRequest(BaseModel):
+    aspect_ratio: Optional[str] = "16:9"
+    prompt_override: Optional[str] = None
+
+
+@router.post("/{project_id}/thumbnail/generate")
+async def generate_project_thumbnail_endpoint(
+    project_id: str,
+    payload: Optional[GenerateThumbnailRequest] = None,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """
+    Generates an ultra-high CTR, high-CPM YouTube Kids thumbnail for the project.
+    """
+    from renderer.compositor import generate_high_ctr_thumbnail
+    from app.models.asset import Asset
+    from app.models.character import Character
+    import asyncio
+
+    repo = ProjectRepository(session)
+    project = await repo.get(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    char_res = await session.execute(select(Character).where(Character.project_id == project_id))
+    char_objs = char_res.scalars().all()
+    char_name = char_objs[0].name if char_objs else "Preschool Hero"
+
+    project_dir = os.path.join(str(settings.resolved_project_dir), project_id)
+    os.makedirs(project_dir, exist_ok=True)
+    thumb_path = os.path.join(project_dir, "thumbnail.jpg")
+    final_video_path = os.path.join(project_dir, "final.mp4")
+
+    ratio = payload.aspect_ratio if (payload and payload.aspect_ratio) else "16:9"
+
+    await asyncio.to_thread(
+        generate_high_ctr_thumbnail,
+        title=project.title,
+        topic=project.topic or project.title,
+        output_thumbnail_path=thumb_path,
+        video_path=final_video_path if os.path.exists(final_video_path) else None,
+        aspect_ratio=ratio,
+        character_name=char_name,
+    )
+
+    # Save to Asset
+    asset_res = await session.execute(select(Asset).where(Asset.project_id == project_id, Asset.asset_type == "thumbnail"))
+    existing_asset = asset_res.scalars().first()
+    if not existing_asset:
+        session.add(Asset(project_id=project_id, asset_type="thumbnail", file_path=thumb_path))
+    else:
+        existing_asset.file_path = thumb_path
+    await session.commit()
+
+    return {
+        "status": "success",
+        "thumbnail_url": f"/api/v1/projects/{project_id}/thumbnail",
+        "aspect_ratio": ratio,
+        "message": "High-CTR YouTube Kids Thumbnail generated successfully!",
+    }

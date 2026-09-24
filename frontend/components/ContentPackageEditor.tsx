@@ -252,7 +252,7 @@ export function ContentPackageEditor({
                 <span className="font-semibold text-[#1D1D1F]">Tags:</span> {formattedTags || "Preschool, Nursery Rhymes, Kids Song, 3D Animation"}
               </div>
               <div className="text-[#2563EB] font-mono text-[10px] truncate">
-                {formattedHashtags || "#NurseryRhymes #KidsSongs #Cocomelon #Preschool"}
+                {formattedHashtags || "#NurseryRhymes #KidsSongs #PreschoolRhymes #Preschool"}
               </div>
             </div>
           </div>

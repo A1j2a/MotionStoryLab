@@ -20,9 +20,8 @@ import {
 import { HealthStatus } from "./HealthStatus";
 
 const NAV_ITEMS = [
-  { href: "/", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/", label: "Studio Dashboard (10-Step)", icon: LayoutDashboard, highlight: true },
   { href: "/projects", label: "Projects", icon: Film },
-  { href: "/create", label: "Create Video", icon: PlusCircle, highlight: true },
   { href: "/workflow", label: "Engine Workflow", icon: Layers },
   { href: "/scenes", label: "Scene Editor", icon: Clapperboard },
   { href: "/characters", label: "Character Bible", icon: Users2 },

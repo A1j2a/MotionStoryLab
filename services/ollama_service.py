@@ -84,7 +84,7 @@ async def chat_completions(req: ChatRequest):
                 f"Sing with Us: {clean_t} ✨ Super Fun Preschool Learning",
             ],
             "description": f"Join our sunny friends as we sing and dance to {clean_t}! Perfect for toddlers and preschoolers to learn rhythm and vocabulary.\n\n⏱️ Chapters:\n00:00 - Welcome & Sing-Along\n00:15 - Happy Verse Dance\n00:30 - Chorus Together\n00:45 - Goodbye & Sweet Dreams",
-            "hashtags": [f"#{clean_t.replace(' ', '').lower()}", "#nurseryrhymes", "#kidssongs", "#toddlerlearning", "#preschool", "#cocomelon"],
+            "hashtags": [f"#{clean_t.replace(' ', '').lower()}", "#nurseryrhymes", "#kidssongs", "#toddlerlearning", "#preschool", "#toddlerfun"],
             "tags": [
                 clean_t.lower(),
                 f"{clean_t.lower()} song",
@@ -93,9 +93,7 @@ async def chat_completions(req: ChatRequest):
                 "kids songs",
                 "toddler songs",
                 "preschool animation",
-                "cocomelon style",
-                "super simple songs",
-                "learning for kids",
+                                                "learning for kids",
                 "sing along songs",
                 "baby cartoon 2026",
             ]

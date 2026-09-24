@@ -31,6 +31,15 @@ import {
   PowerOff,
   Activity,
   Copy,
+  Music,
+  Radio,
+  UploadCloud,
+  Video,
+  Film,
+  Image as ImageIcon,
+  Monitor,
+  Smartphone,
+  Clapperboard,
 } from "lucide-react";
 
 export default function SettingsPage() {
@@ -51,13 +60,31 @@ export default function SettingsPage() {
   const [enabled, setEnabled] = useState(false);
   const [apiKey, setApiKey] = useState("");
   const [showApiKey, setShowApiKey] = useState(false);
-  const [selectedModel, setSelectedModel] = useState("deepseek/deepseek-r1:free");
+  const [selectedModel, setSelectedModel] = useState("meta-llama/llama-3.3-70b-instruct");
   const [customModel, setCustomModel] = useState("");
   const [savingAI, setSavingAI] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [copiedKey, setCopiedKey] = useState(false);
 
-  // Testing State
+  // Video Settings State
+  const [videoEnabled, setVideoEnabled] = useState(false);
+  const [videoModel, setVideoModel] = useState("bytedance/seedance-2.0-mini");
+  const [customVideoModel, setCustomVideoModel] = useState("");
+  const [videoAspectRatio, setVideoAspectRatio] = useState("16:9");
+  const [testingVideo, setTestingVideo] = useState(false);
+  const [videoTestResult, setVideoTestResult] = useState<any | null>(null);
+  const [videoTestError, setVideoTestError] = useState<string | null>(null);
+
+  // Thumbnail Settings State
+  const [thumbEnabled, setThumbEnabled] = useState(true);
+  const [thumbModel, setThumbModel] = useState("high_ctr_graphic");
+  const [thumbAspectRatio, setThumbAspectRatio] = useState("16:9");
+  const [autoSongEnabled, setAutoSongEnabled] = useState(true);
+  const [testingThumb, setTestingThumb] = useState(false);
+  const [thumbTestResult, setThumbTestResult] = useState<any | null>(null);
+  const [thumbTestError, setThumbTestError] = useState<string | null>(null);
+
+  // Text Model Testing State
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<TestConnectionResult | null>(null);
   const [testError, setTestError] = useState<string | null>(null);
@@ -103,10 +130,17 @@ export default function SettingsPage() {
       const data = await api.getAISettings();
       setAiSettings(data);
       setEnabled(data.openrouter_enabled);
-      setSelectedModel(data.openrouter_model || "deepseek/deepseek-r1:free");
+      setSelectedModel(data.openrouter_model || "meta-llama/llama-3.3-70b-instruct");
       if (data.openrouter_api_key) {
         setApiKey(data.openrouter_api_key);
       }
+      setVideoEnabled(data.openrouter_video_enabled || false);
+      setVideoModel(data.openrouter_video_model || "bytedance/seedance-2.0-mini");
+      setVideoAspectRatio(data.video_aspect_ratio || "16:9");
+      setThumbEnabled(data.thumbnail_generator_enabled !== undefined ? data.thumbnail_generator_enabled : true);
+      setThumbModel(data.thumbnail_model || "high_ctr_graphic");
+      setThumbAspectRatio(data.thumbnail_aspect_ratio || "16:9");
+      setAutoSongEnabled(data.auto_song_generation_enabled !== false);
     } catch (err) {
       console.error("Failed to load AI settings:", err);
     }
@@ -124,23 +158,42 @@ export default function SettingsPage() {
     return () => clearInterval(interval);
   }, []);
 
-  const handleSaveAISettings = async (overrideEnabled?: boolean) => {
+  const handleSaveAISettings = async (
+    overrideEnabled?: boolean,
+    overrideVideoEnabled?: boolean,
+    overrideThumbEnabled?: boolean,
+    overrideAutoSong?: boolean
+  ) => {
     setSavingAI(true);
     setSaveSuccess(false);
     setTestResult(null);
     setTestError(null);
 
     const isEnabled = overrideEnabled !== undefined ? overrideEnabled : enabled;
+    const isVideoEnabled = overrideVideoEnabled !== undefined ? overrideVideoEnabled : videoEnabled;
+    const isThumbEnabled = overrideThumbEnabled !== undefined ? overrideThumbEnabled : thumbEnabled;
+    const isAutoSongEnabled = overrideAutoSong !== undefined ? overrideAutoSong : autoSongEnabled;
     const modelToSave = customModel.trim() ? customModel.trim() : selectedModel;
+    const videoModelToSave = customVideoModel.trim() ? customVideoModel.trim() : videoModel;
 
     try {
       const updated = await api.updateAISettings({
         openrouter_enabled: isEnabled,
         openrouter_api_key: apiKey.trim() ? apiKey.trim() : undefined,
         openrouter_model: modelToSave,
+        openrouter_video_enabled: isVideoEnabled,
+        openrouter_video_model: videoModelToSave,
+        video_aspect_ratio: videoAspectRatio,
+        thumbnail_generator_enabled: isThumbEnabled,
+        thumbnail_model: thumbModel,
+        thumbnail_aspect_ratio: thumbAspectRatio,
+        auto_song_generation_enabled: isAutoSongEnabled,
       });
       setAiSettings(updated);
       setEnabled(updated.openrouter_enabled);
+      setVideoEnabled(updated.openrouter_video_enabled);
+      setThumbEnabled(updated.thumbnail_generator_enabled);
+      setAutoSongEnabled(updated.auto_song_generation_enabled !== false);
       if (updated.openrouter_api_key) {
         setApiKey(updated.openrouter_api_key);
       }
@@ -156,7 +209,25 @@ export default function SettingsPage() {
   const handleToggleOpenRouter = async () => {
     const nextState = !enabled;
     setEnabled(nextState);
-    await handleSaveAISettings(nextState);
+    await handleSaveAISettings(nextState, videoEnabled, thumbEnabled);
+  };
+
+  const handleToggleVideo = async () => {
+    const nextState = !videoEnabled;
+    setVideoEnabled(nextState);
+    await handleSaveAISettings(enabled, nextState, thumbEnabled);
+  };
+
+  const handleToggleAutoSong = async () => {
+    const nextState = !autoSongEnabled;
+    setAutoSongEnabled(nextState);
+    await handleSaveAISettings(enabled, videoEnabled, thumbEnabled, nextState);
+  };
+
+  const handleToggleThumbnail = async () => {
+    const nextState = !thumbEnabled;
+    setThumbEnabled(nextState);
+    await handleSaveAISettings(enabled, videoEnabled, nextState);
   };
 
   const handleTestConnection = async () => {
@@ -176,6 +247,48 @@ export default function SettingsPage() {
       setTestError(err.message || "Connection failed.");
     } finally {
       setTesting(false);
+    }
+  };
+
+  const handleTestVideo = async () => {
+    setTestingVideo(true);
+    setVideoTestResult(null);
+    setVideoTestError(null);
+
+    const modelToTest = customVideoModel.trim() ? customVideoModel.trim() : videoModel;
+
+    try {
+      const res = await api.testVideoConnection({
+        api_key: apiKey.trim() ? apiKey.trim() : undefined,
+        model: modelToTest,
+        aspect_ratio: videoAspectRatio,
+        prompt: "Cute 3D preschool character dancing on a colorful playground, 8k vibrant cartoon animation",
+      });
+      setVideoTestResult(res);
+    } catch (err: any) {
+      setVideoTestError(err.message || "Video test submission failed.");
+    } finally {
+      setTestingVideo(false);
+    }
+  };
+
+  const handleTestThumbnail = async () => {
+    setTestingThumb(true);
+    setThumbTestResult(null);
+    setThumbTestError(null);
+
+    try {
+      const res = await api.testThumbnailConnection({
+        title: "Numbers Farm: 1 to 10 Fun!",
+        topic: "Preschool Rhyme",
+        model: thumbModel,
+        aspect_ratio: thumbAspectRatio,
+      });
+      setThumbTestResult(res);
+    } catch (err: any) {
+      setThumbTestError(err.message || "Thumbnail test failed.");
+    } finally {
+      setTestingThumb(false);
     }
   };
 
@@ -240,12 +353,12 @@ export default function SettingsPage() {
   return (
     <>
       <Header
-        title="Studio Settings & Tool Lifecycle Manager"
-        subtitle="Manage OpenRouter LLM, on-demand local tool servers, and disk storage optimization"
+        title="Studio Settings & AI Engine Hub"
+        subtitle="Configure OpenRouter LLM, ByteDance Seedance Video Generation, High-CTR Thumbnail Engine, and local tool daemons"
       />
 
       <main className="p-8 space-y-6 flex-1 max-w-4xl mx-auto w-full">
-        {/* OpenRouter AI & Deep Research Engine Card */}
+        {/* 1. OpenRouter Universal API Key & Text Engine */}
         <div className="bg-white border border-[#E5E5EA] rounded-2xl p-6 space-y-6 shadow-xs relative overflow-hidden">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-[#E5E5EA] gap-4">
             <div className="flex items-center gap-3">
@@ -262,7 +375,7 @@ export default function SettingsPage() {
                   </span>
                 </div>
                 <p className="text-xs text-[#86868B] mt-0.5">
-                  Top SEO Research, Viral Rhymes & Cocomelon Lyrics Writing, Character Bibles & Storyboard Engine
+                  Top SEO Research, Viral Rhymes & Catchy Kids Lyrics Writing, Character Bibles & Storyboard Engine
                 </p>
               </div>
             </div>
@@ -302,7 +415,7 @@ export default function SettingsPage() {
           <div className="bg-[#F8FAFC] border border-[#E2E8F0] p-3.5 rounded-xl flex items-center justify-between text-xs">
             <div className="flex items-center gap-2">
               <Bot className="w-4 h-4 text-[#3B82F6]" />
-              <span className="text-[#64748B]">Active AI Engine:</span>
+              <span className="text-[#64748B]">Active Text / SEO Engine:</span>
               <span className="font-bold text-[#0F172A]">
                 {aiSettings?.active_provider || "Detecting..."}
               </span>
@@ -315,16 +428,16 @@ export default function SettingsPage() {
           </div>
 
           <div className="space-y-4">
-            {/* API Key Input (Permanently Saved in SQLite DB + .env) */}
+            {/* API Key Input */}
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <label className="text-xs font-bold text-[#1D1D1F] flex items-center gap-1.5">
                   <Key className="w-3.5 h-3.5 text-[#6B7280]" />
-                  <span>OpenRouter API Key (Permanent Database Storage)</span>
+                  <span>OpenRouter API Key (Shared for LLM, Video & Image Generation)</span>
                   {apiKey && (
                     <span className="text-[11px] text-[#059669] font-semibold flex items-center gap-1">
                       <Check className="w-3 h-3 text-[#10B981]" />
-                      (Permanently Saved)
+                      (Saved in DB)
                     </span>
                   )}
                 </label>
@@ -368,11 +481,11 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            {/* Model Selector & Quick SEO/Song Chips */}
+            {/* Model Selector & Quick Chips */}
             <div>
               <label className="text-xs font-bold text-[#1D1D1F] block mb-1.5 flex items-center gap-1.5">
                 <Sliders className="w-3.5 h-3.5 text-[#6B7280]" />
-                <span>Selected Model (For SEO, Lyrics, Song Rhythm & 3D Storyboard)</span>
+                <span>Text / SEO Model (For Lyrics, Song Rhythm & 3D Storyboard)</span>
               </label>
 
               <select
@@ -385,7 +498,7 @@ export default function SettingsPage() {
               >
                 {aiSettings?.available_models.map((m) => (
                   <option key={m.id} value={m.id}>
-                    {m.name} {m.is_free ? "🎁 [100% FREE]" : "💎 [SOTA]"}
+                    {m.name} {m.is_free ? "🎁 [FREE]" : "💎 [SOTA]"}
                   </option>
                 ))}
               </select>
@@ -394,13 +507,14 @@ export default function SettingsPage() {
               <div className="flex flex-wrap gap-1.5 mt-2.5">
                 <span className="text-[10px] text-[#86868B] self-center mr-1 font-semibold">Recommended:</span>
                 {[
-                  { id: "deepseek/deepseek-r1:free", label: "DeepSeek R1 (Free - SEO & Rhymes)" },
-                  { id: "google/gemini-2.0-flash-exp:free", label: "Gemini 2.0 Flash (Free - Fast SEO)" },
-                  { id: "meta-llama/llama-3.3-70b-instruct:free", label: "Llama 3.3 70B (Free SOTA)" },
-                  { id: "openrouter/free", label: "Auto Free Router" },
-                  { id: "anthropic/claude-3.5-sonnet", label: "Claude 3.5 Sonnet (Best Songwriter)" },
-                  { id: "deepseek/deepseek-chat", label: "DeepSeek V3 (Fast)" },
-                  { id: "openai/gpt-4o", label: "GPT-4o (OpenAI)" },
+                  { id: "openrouter/free", label: "🎁 OpenRouter Free Auto-Router (100% Free)" },
+                  { id: "meta-llama/llama-3.3-70b-instruct:free", label: "🎁 Llama 3.3 70B (Free)" },
+                  { id: "google/gemini-2.0-flash-exp:free", label: "🎁 Gemini 2.0 Flash (100% Free)" },
+                  { id: "deepseek/deepseek-r1:free", label: "🎁 DeepSeek R1 (100% Free)" },
+                  { id: "liquid/lfm-2.5-2.6b:free", label: "🎁 Liquid LFM (100% Free)" },
+                  { id: "meta-llama/llama-3.3-70b-instruct", label: "Llama 3.3 70B (Paid SOTA)" },
+                  { id: "qwen/qwen-2.5-72b-instruct", label: "Qwen 2.5 72B (Paid SOTA)" },
+                  { id: "openai/gpt-4o", label: "GPT-4o (Paid Flagship)" },
                 ].map((chip) => (
                   <button
                     key={chip.id}
@@ -420,14 +534,14 @@ export default function SettingsPage() {
                 ))}
               </div>
 
-              {/* Custom Model Input for any of 592 models */}
+              {/* Custom Model Input */}
               <div className="mt-3 pt-3 border-t border-[#E5E5EA]">
                 <label className="text-[11px] font-semibold text-[#6B7280] block mb-1">
-                  Or enter any custom model ID from OpenRouter&apos;s 592+ catalog:
+                  Or enter custom LLM ID from OpenRouter catalog:
                 </label>
                 <input
                   type="text"
-                  placeholder="e.g. anthropic/claude-3.7-sonnet, qwen/qwen-2.5-72b-instruct"
+                  placeholder="e.g. anthropic/claude-3.7-sonnet"
                   value={customModel}
                   onChange={(e) => setCustomModel(e.target.value)}
                   className="w-full bg-[#FAFAFA] border border-[#E5E5EA] rounded-xl px-3 py-1.5 text-xs font-mono text-[#1D1D1F] focus:bg-white focus:outline-none focus:border-[#2563EB]"
@@ -435,7 +549,7 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            {/* Action Buttons: Save & Test */}
+            {/* Action Buttons: Save & Test Text Model */}
             <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
               <button
                 type="button"
@@ -448,7 +562,7 @@ export default function SettingsPage() {
                 ) : (
                   <Zap className="w-3.5 h-3.5 text-[#F59E0B]" />
                 )}
-                <span>{testing ? "Testing Connection..." : "Test OpenRouter Connection"}</span>
+                <span>{testing ? "Testing Connection..." : "Test OpenRouter Text Connection"}</span>
               </button>
 
               <button
@@ -465,13 +579,12 @@ export default function SettingsPage() {
                 ) : (
                   <>
                     <Sparkles className="w-3.5 h-3.5" />
-                    <span>{savingAI ? "Saving to DB..." : "Save Key & Settings"}</span>
+                    <span>{savingAI ? "Saving to DB..." : "Save All Settings"}</span>
                   </>
                 )}
               </button>
             </div>
 
-            {/* Test Results Card */}
             {testResult && (
               <div className="bg-[#ECFDF5] border border-[#A7F3D0] p-3.5 rounded-xl text-xs space-y-1 animate-in fade-in duration-200">
                 <div className="flex items-center gap-2 text-[#065F46] font-bold">
@@ -496,7 +609,438 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        {/* Interactive Tool Servers & Resource Optimizer Card */}
+        {/* 2. OpenRouter Video Generation Engine (Seedance 2.0 / Kling AI / Luma Ray 2) */}
+        <div className="bg-white border border-[#E5E5EA] rounded-2xl p-6 space-y-6 shadow-xs relative overflow-hidden">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-[#E5E5EA] gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-[#FAF5FF] text-[#9333EA] flex items-center justify-center border border-[#E9D5FF]">
+                <Video className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-base font-bold text-[#1D1D1F]">
+                    OpenRouter Video Generation Engine
+                  </h2>
+                  <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-[#FAF5FF] text-[#9333EA] border border-[#E9D5FF]">
+                    ByteDance Seedance 2.0
+                  </span>
+                </div>
+                <p className="text-xs text-[#86868B] mt-0.5">
+                  Generate complete animated 3D video scenes directly from text prompts & characters
+                </p>
+              </div>
+            </div>
+
+            {/* Video Toggle Switch */}
+            <div className="flex items-center gap-3 self-start sm:self-auto">
+              <span className="text-xs font-semibold text-[#86868B]">
+                {videoEnabled ? (
+                  <span className="text-[#059669] flex items-center gap-1 font-bold">
+                    <span className="w-2 h-2 rounded-full bg-[#10B981] animate-pulse"></span>
+                    ON (Active)
+                  </span>
+                ) : (
+                  <span className="text-[#6B7280]">OFF (Using Local 3D Engine)</span>
+                )}
+              </span>
+
+              <button
+                onClick={handleToggleVideo}
+                disabled={savingAI}
+                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                  videoEnabled ? "bg-[#9333EA]" : "bg-[#D1D5DB]"
+                }`}
+                role="switch"
+                aria-checked={videoEnabled}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
+                    videoEnabled ? "translate-x-5" : "translate-x-0"
+                  }`}
+                />
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Video Model Selector */}
+              <div>
+                <label className="text-xs font-bold text-[#1D1D1F] block mb-1.5 flex items-center gap-1.5">
+                  <Film className="w-3.5 h-3.5 text-[#6B7280]" />
+                  <span>Video Model</span>
+                </label>
+                <select
+                  value={videoModel}
+                  onChange={(e) => {
+                    setVideoModel(e.target.value);
+                    setCustomVideoModel("");
+                  }}
+                  className="w-full bg-[#FAFAFA] border border-[#E5E5EA] rounded-xl px-3 py-2.5 text-xs text-[#1D1D1F] font-medium focus:bg-white focus:outline-none focus:border-[#9333EA] cursor-pointer"
+                >
+                  {(aiSettings?.available_video_models || [
+                    { id: "bytedance/seedance-2.0-mini", name: "ByteDance Seedance 2.0 Mini (Default - High Speed 3D)" },
+                    { id: "bytedance/seedance-2.0", name: "ByteDance Seedance 2.0 Pro (Ultra HD 3D)" },
+                    { id: "klingai/kling-v1.6-standard", name: "Kling AI 1.6 Standard" },
+                    { id: "klingai/kling-v1.6-pro", name: "Kling AI 1.6 Pro" },
+                    { id: "luma/ray-2", name: "Luma Ray 2" },
+                    { id: "minimax/video-01", name: "MiniMax Video 01" },
+                  ]).map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Video Aspect Ratio Selector */}
+              <div>
+                <label className="text-xs font-bold text-[#1D1D1F] block mb-1.5 flex items-center gap-1.5">
+                  <Clapperboard className="w-3.5 h-3.5 text-[#6B7280]" />
+                  <span>Default Video Format (Aspect Ratio)</span>
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setVideoAspectRatio("16:9")}
+                    className={`px-3 py-2 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                      videoAspectRatio === "16:9"
+                        ? "bg-[#FAF5FF] border-[#9333EA] text-[#9333EA] shadow-xs"
+                        : "bg-[#FAFAFA] border-[#E5E5EA] text-[#6B7280] hover:bg-white"
+                    }`}
+                  >
+                    <Monitor className="w-4 h-4" />
+                    <span>16:9 (YouTube Widescreen - Default)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setVideoAspectRatio("9:16")}
+                    className={`px-3 py-2 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                      videoAspectRatio === "9:16"
+                        ? "bg-[#FAF5FF] border-[#9333EA] text-[#9333EA] shadow-xs"
+                        : "bg-[#FAFAFA] border-[#E5E5EA] text-[#6B7280] hover:bg-white"
+                    }`}
+                  >
+                    <Smartphone className="w-4 h-4" />
+                    <span>9:16 (Shorts / Reels / TikTok)</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Custom Video Model Input */}
+            <div className="pt-2">
+              <label className="text-[11px] font-semibold text-[#6B7280] block mb-1">
+                Or enter any custom video model slug from OpenRouter:
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. bytedance/seedance-2.0-mini, klingai/kling-v1.6-pro"
+                value={customVideoModel}
+                onChange={(e) => setCustomVideoModel(e.target.value)}
+                className="w-full bg-[#FAFAFA] border border-[#E5E5EA] rounded-xl px-3 py-1.5 text-xs font-mono text-[#1D1D1F] focus:bg-white focus:outline-none focus:border-[#9333EA]"
+              />
+            </div>
+
+            {/* Test Video Button */}
+            <div className="flex items-center justify-between pt-2">
+              <button
+                type="button"
+                onClick={handleTestVideo}
+                disabled={testingVideo}
+                className="px-4 py-2 rounded-xl text-xs font-semibold bg-[#FAF5FF] text-[#9333EA] hover:bg-[#F3E8FF] border border-[#E9D5FF] transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                {testingVideo ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin text-[#9333EA]" />
+                ) : (
+                  <Video className="w-3.5 h-3.5 text-[#9333EA]" />
+                )}
+                <span>{testingVideo ? "Submitting Video Test..." : "Test OpenRouter Video Submission"}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleSaveAISettings()}
+                disabled={savingAI}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-[#9333EA] text-white hover:bg-[#7E22CE] shadow-xs transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Save Video Config</span>
+              </button>
+            </div>
+
+            {videoTestResult && (
+              <div className="bg-[#FAF5FF] border border-[#E9D5FF] p-3.5 rounded-xl text-xs space-y-1 animate-in fade-in duration-200">
+                <div className="flex items-center gap-2 text-[#7E22CE] font-bold">
+                  <CheckCircle2 className="w-4 h-4 text-[#9333EA]" />
+                  <span>{videoTestResult.message}</span>
+                </div>
+                <p className="text-[11px] text-[#6B21A8] pl-6 font-mono">
+                  Job ID: {videoTestResult.job_id} &bull; Model: {videoTestResult.model} &bull; Aspect Ratio: {videoTestResult.aspect_ratio}
+                </p>
+              </div>
+            )}
+
+            {videoTestError && (
+              <div className="bg-[#FEF2F2] border border-[#FECACA] p-3.5 rounded-xl text-xs space-y-1 animate-in fade-in duration-200">
+                <div className="flex items-center gap-2 text-[#991B1B] font-bold">
+                  <XCircle className="w-4 h-4 text-[#EF4444]" />
+                  <span>Video Test Error</span>
+                </div>
+                <p className="text-[11px] text-[#B91C1C] pl-6 font-mono">{videoTestError}</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* 3. High-CTR & High-CPM YouTube Kids Thumbnail Engine */}
+        <div className="bg-white border border-[#E5E5EA] rounded-2xl p-6 space-y-6 shadow-xs relative overflow-hidden">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-[#E5E5EA] gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-[#FFFBEB] text-[#D97706] flex items-center justify-center border border-[#FDE68A]">
+                <ImageIcon className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-base font-bold text-[#1D1D1F]">
+                    High-CTR YouTube Kids Thumbnail Engine
+                  </h2>
+                  <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-[#FFFBEB] text-[#D97706] border border-[#FDE68A]">
+                    High CPM Cues
+                  </span>
+                </div>
+                <p className="text-xs text-[#86868B] mt-0.5">
+                  Generates vibrant 3D Pixar YouTube covers with 3D title text, action hooks, and high-CTR badges
+                </p>
+              </div>
+            </div>
+
+            {/* Thumbnail Toggle Switch */}
+            <div className="flex items-center gap-3 self-start sm:self-auto">
+              <span className="text-xs font-semibold text-[#86868B]">
+                {thumbEnabled ? (
+                  <span className="text-[#059669] flex items-center gap-1 font-bold">
+                    <span className="w-2 h-2 rounded-full bg-[#10B981] animate-pulse"></span>
+                    ON (Active)
+                  </span>
+                ) : (
+                  <span className="text-[#6B7280]">OFF</span>
+                )}
+              </span>
+
+              <button
+                onClick={handleToggleThumbnail}
+                disabled={savingAI}
+                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                  thumbEnabled ? "bg-[#D97706]" : "bg-[#D1D5DB]"
+                }`}
+                role="switch"
+                aria-checked={thumbEnabled}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
+                    thumbEnabled ? "translate-x-5" : "translate-x-0"
+                  }`}
+                />
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Thumbnail Model Selector */}
+              <div>
+                <label className="text-xs font-bold text-[#1D1D1F] block mb-1.5 flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-[#6B7280]" />
+                  <span>Thumbnail Generator Model</span>
+                </label>
+                <select
+                  value={thumbModel}
+                  onChange={(e) => setThumbModel(e.target.value)}
+                  className="w-full bg-[#FAFAFA] border border-[#E5E5EA] rounded-xl px-3 py-2.5 text-xs text-[#1D1D1F] font-medium focus:bg-white focus:outline-none focus:border-[#D97706] cursor-pointer"
+                >
+                  {(aiSettings?.available_thumbnail_models || [
+                    { id: "high_ctr_graphic", name: "High-CTR 3D Visual Graphic Engine (Local Fast & Free)" },
+                    { id: "openai/dall-e-3", name: "DALL-E 3 (OpenAI High-CTR Pixar Cover)" },
+                    { id: "black-forest-labs/flux-1-schnell", name: "Flux 1 Schnell (Ultra Fast)" },
+                    { id: "black-forest-labs/flux-1-dev", name: "Flux 1 Dev (High Fidelity)" },
+                    { id: "google/imagen-3", name: "Google Imagen 3" },
+                  ]).map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Thumbnail Aspect Ratio Selector */}
+              <div>
+                <label className="text-xs font-bold text-[#1D1D1F] block mb-1.5 flex items-center gap-1.5">
+                  <Clapperboard className="w-3.5 h-3.5 text-[#6B7280]" />
+                  <span>Thumbnail Aspect Ratio</span>
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setThumbAspectRatio("16:9")}
+                    className={`px-3 py-2 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                      thumbAspectRatio === "16:9"
+                        ? "bg-[#FFFBEB] border-[#D97706] text-[#D97706] shadow-xs"
+                        : "bg-[#FAFAFA] border-[#E5E5EA] text-[#6B7280] hover:bg-white"
+                    }`}
+                  >
+                    <Monitor className="w-4 h-4" />
+                    <span>16:9 (1280x720 - YouTube)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setThumbAspectRatio("9:16")}
+                    className={`px-3 py-2 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                      thumbAspectRatio === "9:16"
+                        ? "bg-[#FFFBEB] border-[#D97706] text-[#D97706] shadow-xs"
+                        : "bg-[#FAFAFA] border-[#E5E5EA] text-[#6B7280] hover:bg-white"
+                    }`}
+                  >
+                    <Smartphone className="w-4 h-4" />
+                    <span>9:16 (1080x1920 - Shorts)</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Test Thumbnail Button */}
+            <div className="flex items-center justify-between pt-2">
+              <button
+                type="button"
+                onClick={handleTestThumbnail}
+                disabled={testingThumb}
+                className="px-4 py-2 rounded-xl text-xs font-semibold bg-[#FFFBEB] text-[#D97706] hover:bg-[#FEF3C7] border border-[#FDE68A] transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                {testingThumb ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin text-[#D97706]" />
+                ) : (
+                  <ImageIcon className="w-3.5 h-3.5 text-[#D97706]" />
+                )}
+                <span>{testingThumb ? "Generating Sample..." : "Test High-CTR Thumbnail Generator"}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleSaveAISettings()}
+                disabled={savingAI}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-[#D97706] text-white hover:bg-[#B45309] shadow-xs transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Save Thumbnail Config</span>
+              </button>
+            </div>
+
+            {thumbTestResult && (
+              <div className="bg-[#ECFDF5] border border-[#A7F3D0] p-3.5 rounded-xl text-xs space-y-1 animate-in fade-in duration-200">
+                <div className="flex items-center gap-2 text-[#065F46] font-bold">
+                  <CheckCircle2 className="w-4 h-4 text-[#10B981]" />
+                  <span>{thumbTestResult.message}</span>
+                </div>
+                <p className="text-[11px] text-[#047857] pl-6 font-mono">
+                  Model: {thumbTestResult.model} &bull; Format: {thumbTestResult.aspect_ratio} &bull; Output Size: {thumbTestResult.file_size} bytes
+                </p>
+              </div>
+            )}
+
+            {thumbTestError && (
+              <div className="bg-[#FEF2F2] border border-[#FECACA] p-3.5 rounded-xl text-xs space-y-1 animate-in fade-in duration-200">
+                <div className="flex items-center gap-2 text-[#991B1B] font-bold">
+                  <XCircle className="w-4 h-4 text-[#EF4444]" />
+                  <span>Thumbnail Test Error</span>
+                </div>
+                <p className="text-[11px] text-[#B91C1C] pl-6 font-mono">{thumbTestError}</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* 4. Music & Song Production Mode (Auto Neural Synthesizer vs Manual Suno AI) */}
+        <div className="bg-white border border-[#E5E5EA] rounded-2xl p-6 space-y-6 shadow-xs relative overflow-hidden">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-[#E5E5EA] gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-[#FFF7ED] text-[#EA580C] flex items-center justify-center border border-[#FED7AA]">
+                <Music className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-base font-bold text-[#1D1D1F]">
+                    Music & Song Production Engine
+                  </h2>
+                  <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-[#FFF7ED] text-[#EA580C] border border-[#FED7AA]">
+                    {autoSongEnabled ? "Auto Synthesizer" : "Manual Suno AI Mode"}
+                  </span>
+                </div>
+                <p className="text-xs text-[#86868B] mt-0.5">
+                  Choose between automated local neural music synthesis or manual Suno AI generation with drag-and-drop audio upload
+                </p>
+              </div>
+            </div>
+
+            {/* Auto Song Toggle */}
+            <div className="flex items-center gap-3 self-start sm:self-auto">
+              <span className="text-xs font-semibold text-[#86868B]">
+                {autoSongEnabled ? (
+                  <span className="text-[#059669] flex items-center gap-1 font-bold">
+                    <span className="w-2 h-2 rounded-full bg-[#10B981] animate-pulse"></span>
+                    AUTO SYNTHESIZER (ON)
+                  </span>
+                ) : (
+                  <span className="text-[#EA580C] font-bold flex items-center gap-1">
+                    <Radio className="w-3.5 h-3.5" />
+                    MANUAL SUNO AI MODE (OFF)
+                  </span>
+                )}
+              </span>
+
+              <button
+                onClick={handleToggleAutoSong}
+                disabled={savingAI}
+                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                  autoSongEnabled ? "bg-[#EA580C]" : "bg-[#D1D5DB]"
+                }`}
+                role="switch"
+                aria-checked={autoSongEnabled}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
+                    autoSongEnabled ? "translate-x-5" : "translate-x-0"
+                  }`}
+                />
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className={`p-4 rounded-xl border transition-all ${autoSongEnabled ? "bg-[#FFF7ED] border-[#FED7AA]" : "bg-[#FAFAFA] border-[#E5E5EA] opacity-60"}`}>
+              <div className="flex items-center gap-2 font-bold text-xs text-[#9A3412] mb-1">
+                <Sparkles className="w-4 h-4 text-[#EA580C]" />
+                <span>Auto Synthesizer Mode (When ON)</span>
+              </div>
+              <p className="text-[11px] text-[#7C2D12] leading-relaxed">
+                Automatically composes melodies and vocal tracks locally without manual intervention. Great for 100% automated batch pipelines.
+              </p>
+            </div>
+
+            <div className={`p-4 rounded-xl border transition-all ${!autoSongEnabled ? "bg-[#FFF7ED] border-[#FED7AA]" : "bg-[#FAFAFA] border-[#E5E5EA] opacity-60"}`}>
+              <div className="flex items-center gap-2 font-bold text-xs text-[#9A3412] mb-1">
+                <Radio className="w-4 h-4 text-[#EA580C]" />
+                <span>Manual Suno AI Mode (When OFF)</span>
+              </div>
+              <p className="text-[11px] text-[#7C2D12] leading-relaxed">
+                Generates high-engagement Suno AI prompts, catchy kids titles, and tagged lyrics. Paste into Suno.ai, download the song, and upload it here to auto-sync scenes and subtitles (.srt).
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* 4. Local Tool Servers & Resource Optimizer */}
         <div className="bg-white border border-[#E5E5EA] rounded-2xl p-6 space-y-5 shadow-xs">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-[#E5E5EA] gap-3">
             <div className="flex items-center gap-3">
@@ -586,7 +1130,7 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        {/* Storage Management & Cache Cleaner Card */}
+        {/* 5. Storage & Disk Cache Management */}
         <div className="bg-white border border-[#E5E5EA] rounded-2xl p-6 space-y-5 shadow-xs">
           <div className="flex items-center justify-between pb-4 border-b border-[#E5E5EA]">
             <div className="flex items-center gap-3">

@@ -96,7 +96,10 @@ class OpenRouterProvider(BaseAIProvider):
                     data = json.loads(response.read().decode("utf-8"))
                     choices = data.get("choices", [])
                     if choices and "message" in choices[0]:
-                        return choices[0]["message"].get("content", "")
+                        msg = choices[0]["message"]
+                        msg_content = msg.get("content") or msg.get("reasoning") or ""
+                        if msg_content:
+                            return msg_content
         except urllib.error.HTTPError as e:
             err_text = ""
             try:
@@ -106,6 +109,39 @@ class OpenRouterProvider(BaseAIProvider):
                 err_text = str(e)
             self.last_error = f"HTTP {e.code}: {err_text}"
             logger.warning(f"OpenRouter API call failed to {target_url} (Model: {self.model}): {self.last_error}")
+
+            # If user selected a paid model and hits credit limit (HTTP 402) or unavailable free slug (HTTP 404), fallback to active free models
+            if e.code == 402 or (e.code == 404 and ":free" in self.model):
+                logger.warning(f"Model '{self.model}' unavailable or credit limit reached (HTTP {e.code}). Attempting automatic fallback to free models...")
+                free_fallbacks = [
+                    "openrouter/free",
+                    "inclusionai/ling-3.0-flash-sante:free",
+                    "inclusionai/ling-3.0-flash-fin:free",
+                ]
+                for fb_model in free_fallbacks:
+                    try:
+                        logger.info(f"Retrying OpenRouter request with free model: {fb_model}...")
+                        payload["model"] = fb_model
+                        payload["max_tokens"] = min(token_limit, 1200)
+                        req = urllib.request.Request(
+                            target_url,
+                            data=json.dumps(payload).encode("utf-8"),
+                            headers=headers,
+                            method="POST",
+                        )
+                        with urllib.request.urlopen(req, timeout=60) as fb_response:
+                            if fb_response.status == 200:
+                                fb_data = json.loads(fb_response.read().decode("utf-8"))
+                                fb_choices = fb_data.get("choices", [])
+                                if fb_choices and "message" in fb_choices[0]:
+                                    fb_msg = fb_choices[0]["message"]
+                                    fb_content = fb_msg.get("content") or fb_msg.get("reasoning") or ""
+                                    if fb_content:
+                                        logger.info(f"Successfully generated response via fallback free model '{fb_model}'!")
+                                        return fb_content
+                    except Exception as fb_err:
+                        logger.warning(f"Fallback to {fb_model} failed: {fb_err}")
+
             return None
         except Exception as e:
             self.last_error = str(e)
@@ -116,9 +152,21 @@ class OpenRouterProvider(BaseAIProvider):
     def generate_json(self, prompt: str, system_prompt: str = "", max_tokens: Optional[int] = None) -> Optional[Dict[str, Any]]:
         raw = self._call_api(prompt, system_prompt, max_tokens=max_tokens)
         if not raw:
-            return None
+            logger.info("OpenRouter returned no response. Cascading to local Ollama provider...")
+            try:
+                return OllamaProvider().generate_json(prompt, system_prompt, max_tokens=max_tokens)
+            except Exception as e:
+                logger.warning(f"Ollama cascade failed: {e}")
+                return None
         parsed = extract_and_repair_json(raw)
         if parsed is None:
+            logger.warning(f"OpenRouter response unparseable (len: {len(raw)}). Cascading to local Ollama provider...")
+            try:
+                res = OllamaProvider().generate_json(prompt, system_prompt, max_tokens=max_tokens)
+                if res:
+                    return res
+            except Exception as e:
+                logger.warning(f"Ollama cascade failed: {e}")
             self.last_error = f"LLM response could not be parsed into JSON (length: {len(raw)})"
         return parsed
 
@@ -333,3 +381,221 @@ def get_ai_provider() -> BaseAIProvider:
         return OmniRouteProvider()
 
     return OllamaProvider()
+
+
+class OpenRouterVideoProvider:
+    """
+    OpenRouter Video Generation Gateway (ByteDance Seedance 2.0 Mini, Kling AI, Luma Ray 2, MiniMax).
+    Submits generation jobs to OpenRouter API /videos endpoint and polls for completion.
+    """
+
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        model: Optional[str] = None,
+        aspect_ratio: Optional[str] = None,
+        base_url: Optional[str] = None,
+    ):
+        db_key = _get_db_config("OPENROUTER_API_KEY")
+        db_model = _get_db_config("OPENROUTER_VIDEO_MODEL")
+        db_ratio = _get_db_config("VIDEO_ASPECT_RATIO")
+
+        self.api_key = (api_key or db_key or os.environ.get("OPENROUTER_API_KEY", "")).strip()
+        self.model = (model or db_model or os.environ.get("OPENROUTER_VIDEO_MODEL", "bytedance/seedance-2.0-mini")).strip()
+        self.aspect_ratio = (aspect_ratio or db_ratio or os.environ.get("VIDEO_ASPECT_RATIO", "16:9")).strip()
+        self.base_url = (base_url or os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")).rstrip("/")
+        self.last_error = ""
+
+    def submit_video_job(
+        self,
+        prompt: str,
+        model: Optional[str] = None,
+        aspect_ratio: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        if not self.api_key:
+            self.last_error = "OpenRouter API Key not set. Please configure in Settings."
+            logger.warning(self.last_error)
+            return None
+
+        used_model = (model or self.model or "bytedance/seedance-2.0-mini").strip()
+        used_ratio = (aspect_ratio or self.aspect_ratio or "16:9").strip()
+
+        target_url = f"{self.base_url}/videos"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}",
+            "HTTP-Referer": "http://127.0.0.1:3000",
+            "X-Title": "MotionStoryLab Video Engine",
+        }
+
+        payload = {
+            "model": used_model,
+            "prompt": prompt,
+            "aspect_ratio": used_ratio,
+        }
+
+        try:
+            logger.info(f"Submitting OpenRouter video request to {target_url} (Model: {used_model}, Ratio: {used_ratio})")
+            req = urllib.request.Request(
+                target_url,
+                data=json.dumps(payload).encode("utf-8"),
+                headers=headers,
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=45) as response:
+                if response.status in (200, 201, 202):
+                    res_body = json.loads(response.read().decode("utf-8"))
+                    job_id = res_body.get("id")
+                    polling_url = res_body.get("polling_url") or f"{target_url}/{job_id}"
+                    return {
+                        "id": job_id,
+                        "polling_url": polling_url,
+                        "status": res_body.get("status", "pending"),
+                        "model": used_model,
+                        "aspect_ratio": used_ratio,
+                        "raw": res_body,
+                    }
+        except urllib.error.HTTPError as e:
+            err_text = ""
+            try:
+                err_body = json.loads(e.read().decode("utf-8"))
+                err_text = err_body.get("error", {}).get("message", str(e))
+            except Exception:
+                err_text = str(e)
+            self.last_error = f"HTTP {e.code}: {err_text}"
+            logger.error(f"OpenRouter Video submission failed: {self.last_error}")
+            return None
+        except Exception as e:
+            self.last_error = str(e)
+            logger.error(f"OpenRouter Video submission error: {e}")
+            return None
+
+    def poll_for_video(
+        self,
+        polling_url: str,
+        max_wait_sec: int = 240,
+        poll_interval_sec: int = 5,
+    ) -> Optional[str]:
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "HTTP-Referer": "http://127.0.0.1:3000",
+        }
+
+        start_time = time.time()
+        while time.time() - start_time < max_wait_sec:
+            try:
+                req = urllib.request.Request(polling_url, headers=headers, method="GET")
+                with urllib.request.urlopen(req, timeout=30) as response:
+                    if response.status == 200:
+                        status_data = json.loads(response.read().decode("utf-8"))
+                        status = status_data.get("status", "").lower()
+                        logger.info(f"Polling OpenRouter video status: {status}")
+
+                        if status == "completed":
+                            unsigned = status_data.get("unsigned_urls", [])
+                            if unsigned and isinstance(unsigned, list) and len(unsigned) > 0:
+                                return unsigned[0]
+                            urls = status_data.get("urls", [])
+                            if urls and isinstance(urls, list) and len(urls) > 0:
+                                return urls[0]
+                            video_url = status_data.get("video_url") or status_data.get("url")
+                            if video_url:
+                                return video_url
+                            return None
+                        elif status in ("failed", "error", "cancelled"):
+                            err_msg = status_data.get("error", "Generation failed on server")
+                            self.last_error = str(err_msg)
+                            logger.error(f"OpenRouter video generation failed: {self.last_error}")
+                            return None
+            except Exception as e:
+                logger.warning(f"Retrying poll ({e})...")
+
+            time.sleep(poll_interval_sec)
+
+        self.last_error = f"Video generation timed out after {max_wait_sec} seconds."
+        return None
+
+    def generate_and_download_video(
+        self,
+        prompt: str,
+        output_path: str,
+        model: Optional[str] = None,
+        aspect_ratio: Optional[str] = None,
+        max_wait_sec: int = 240,
+    ) -> bool:
+        job = self.submit_video_job(prompt, model=model, aspect_ratio=aspect_ratio)
+        if not job or not job.get("polling_url"):
+            return False
+
+        video_url = self.poll_for_video(job["polling_url"], max_wait_sec=max_wait_sec)
+        if not video_url:
+            return False
+
+        try:
+            logger.info(f"Downloading completed video from {video_url} to {output_path}")
+            os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+            urllib.request.urlretrieve(video_url, output_path)
+            if os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
+                return True
+            else:
+                self.last_error = "Downloaded video file is empty or corrupted."
+                return False
+        except Exception as e:
+            self.last_error = f"Failed to download video from {video_url}: {e}"
+            logger.error(self.last_error)
+            return False
+
+
+class OpenRouterImageProvider:
+    """
+    OpenRouter Image & Thumbnail Generation Gateway.
+    """
+
+    def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None, base_url: Optional[str] = None):
+        db_key = _get_db_config("OPENROUTER_API_KEY")
+        db_model = _get_db_config("THUMBNAIL_MODEL")
+        self.api_key = (api_key or db_key or os.environ.get("OPENROUTER_API_KEY", "")).strip()
+        self.model = (model or db_model or os.environ.get("THUMBNAIL_MODEL", "openai/dall-e-3")).strip()
+        self.base_url = (base_url or os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")).rstrip("/")
+        self.last_error = ""
+
+    def generate_image(self, prompt: str, model: Optional[str] = None, aspect_ratio: str = "16:9") -> Optional[str]:
+        if not self.api_key:
+            self.last_error = "OpenRouter API Key not set."
+            return None
+
+        used_model = (model or self.model or "openai/dall-e-3").strip()
+        target_url = f"{self.base_url}/images/generations"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}",
+            "HTTP-Referer": "http://127.0.0.1:3000",
+            "X-Title": "MotionStoryLab Thumbnail Engine",
+        }
+
+        size = "1792x1024" if aspect_ratio == "16:9" else "1024x1792"
+        payload = {
+            "model": used_model,
+            "prompt": prompt,
+            "size": size,
+            "n": 1,
+        }
+
+        try:
+            req = urllib.request.Request(
+                target_url,
+                data=json.dumps(payload).encode("utf-8"),
+                headers=headers,
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=60) as response:
+                if response.status == 200:
+                    data = json.loads(response.read().decode("utf-8"))
+                    items = data.get("data", [])
+                    if items and "url" in items[0]:
+                        return items[0]["url"]
+        except Exception as e:
+            self.last_error = str(e)
+            logger.warning(f"OpenRouter Image generation call failed: {e}")
+            return None
+        return None

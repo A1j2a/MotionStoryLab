@@ -14,6 +14,7 @@ import {
   TestConnectionResult,
   SeoData,
   ServiceToolItem,
+  SunoPromptPackage,
 } from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
@@ -87,7 +88,19 @@ export const api = {
 
   // AI & OpenRouter Settings
   getAISettings: () => request<AISettings>("/api/v1/settings/ai", {}, 5000),
-  updateAISettings: (payload: { openrouter_enabled: boolean; openrouter_api_key?: string; openrouter_model?: string }) =>
+  updateAISettings: (payload: {
+    openrouter_enabled: boolean;
+    openrouter_api_key?: string;
+    openrouter_model?: string;
+    openrouter_video_enabled?: boolean;
+    openrouter_video_model?: string;
+    video_aspect_ratio?: string;
+    thumbnail_generator_enabled?: boolean;
+    thumbnail_engine?: string;
+    thumbnail_model?: string;
+    thumbnail_aspect_ratio?: string;
+    auto_song_generation_enabled?: boolean;
+  }) =>
     request<AISettings>("/api/v1/settings/ai", {
       method: "POST",
       body: JSON.stringify(payload),
@@ -98,9 +111,18 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  // Step 1: Topics Discovery & Selection
-  discoverTopics: (limit = 12) =>
-    request<TopicOpportunity[]>(`/api/v1/topics/discover?limit=${limit}`, {}, 45000),
+  // Step 1: Topics Discovery & Selection with Filters
+  discoverTopics: (options?: number | { limit?: number; target_age?: string; duration?: string; language?: string }) => {
+    if (typeof options === "number") {
+      return request<TopicOpportunity[]>(`/api/v1/topics/discover?limit=${options}`, {}, 90000);
+    }
+    const params = new URLSearchParams();
+    params.set("limit", String(options?.limit || 8));
+    if (options?.target_age && options.target_age !== "all") params.set("target_age", options.target_age);
+    if (options?.duration) params.set("duration", options.duration);
+    if (options?.language) params.set("language", options.language);
+    return request<TopicOpportunity[]>(`/api/v1/topics/discover?${params.toString()}`, {}, 90000);
+  },
   selectTopic: (payload: Partial<TopicOpportunity>) =>
     request<Project>("/api/v1/topics/select", {
       method: "POST",
@@ -113,7 +135,7 @@ export const api = {
   generateContentPackage: (projectId: string) =>
     request<ContentPackage>(`/api/v1/projects/${projectId}/content-package/generate`, {
       method: "POST",
-    }, 45000),
+    }, 90000),
   saveContentPackage: (projectId: string, payload: Partial<ContentPackage>) =>
     request<ContentPackage>(`/api/v1/projects/${projectId}/content-package`, {
       method: "PUT",
@@ -122,13 +144,35 @@ export const api = {
   regenerateLyrics: (projectId: string) =>
     request<ContentPackage>(`/api/v1/projects/${projectId}/lyrics/regenerate`, {
       method: "POST",
-    }, 45000),
+    }, 90000),
+
+  // Suno AI & Audio Upload
+  getSunoPrompt: (projectId: string) =>
+    request<SunoPromptPackage>(`/api/v1/projects/${projectId}/suno-prompt`),
+  uploadSongAudio: async (projectId: string, file: File, lyrics?: string) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    if (lyrics) {
+      formData.append("lyrics", lyrics);
+    }
+    const res = await fetch(`${API_BASE}/api/v1/projects/${projectId}/audio/upload`, {
+      method: "POST",
+      body: formData,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: "Upload failed" }));
+      throw new Error(err.detail || "Audio upload failed");
+    }
+    return res.json();
+  },
+  getSubtitlesDownloadUrl: (projectId: string) =>
+    `${API_BASE}/api/v1/projects/${projectId}/subtitles`,
 
   // Step 6 & 7: Song Generation & Audio Timeline
   generateSong: (projectId: string) =>
     request<{ status: string; message: string }>(`/api/v1/projects/${projectId}/song/generate`, {
       method: "POST",
-    }, 60000),
+    }, 90000),
   getAudioTimeline: (projectId: string) =>
     request<AudioTimeline>(`/api/v1/projects/${projectId}/audio-timeline`),
   getSongAudioUrl: (projectId: string) =>
@@ -138,13 +182,13 @@ export const api = {
   generateStoryboard: (projectId: string) =>
     request<any[]>(`/api/v1/projects/${projectId}/storyboard/generate`, {
       method: "POST",
-    }, 45000),
+    }, 90000),
   validateStoryboard: (projectId: string) =>
     request<{ is_valid: boolean; errors: string[]; total_scenes: number; total_duration: number }>(
       `/api/v1/projects/${projectId}/storyboard/validate`
     ),
   renderScenes: (projectId: string) =>
-    request<Job>(`/api/v1/projects/${projectId}/render-scenes`, {
+    request<any>(`/api/v1/projects/${projectId}/render/scenes`, {
       method: "POST",
     }),
   rerenderSingleScene: (sceneId: string) =>
@@ -314,4 +358,27 @@ export const api = {
       `/api/v1/storage/clear?purge_all=${purgeAll}`,
       { method: "POST" }
     ),
+  // Thumbnail Generation
+  generateThumbnail: (projectId: string, payload?: { aspect_ratio?: string; prompt_override?: string }) =>
+    request<{ status: string; thumbnail_url: string; aspect_ratio: string; message: string }>(
+      `/api/v1/projects/${projectId}/thumbnail/generate`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload || { aspect_ratio: "16:9" }),
+      },
+      60000
+    ),
+
+  // Video & Thumbnail AI Tests
+  testVideoConnection: (payload: { api_key?: string; model?: string; aspect_ratio?: string; prompt?: string }) =>
+    request<any>("/api/v1/settings/video/test", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }, 45000),
+
+  testThumbnailConnection: (payload: { title?: string; topic?: string; model?: string; aspect_ratio?: string }) =>
+    request<any>("/api/v1/settings/thumbnail/test", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }, 30000),
 };

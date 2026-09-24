@@ -282,18 +282,30 @@ def generate_subtitles_srt(scenes: List[Dict[str, Any]], output_srt: str, total_
     if not scenes:
         scenes = [{"duration": 15.0, "lyrics": "Singing our happy nursery song today!"}]
 
-    current_sec = 0.5
-    idx = 1
-    while current_sec < total_duration_sec:
-        sc = scenes[(idx - 1) % len(scenes)]
-        dur = float(sc.get("duration", 6.0))
-        end_sec = min(total_duration_sec, current_sec + dur - 0.5)
-        lyrics = sc.get("lyrics") or sc.get("dialogue") or f"Musical Adventure Scene {idx}"
+    # Check if exact start/end timestamps are provided
+    has_timestamps = any(("start" in sc and "end" in sc) or ("start_time" in sc and "end_time" in sc) for sc in scenes)
+    if has_timestamps:
+        for idx, sc in enumerate(scenes, start=1):
+            s_start = float(sc.get("start") if "start" in sc else sc.get("start_time", 0.0))
+            s_end = float(sc.get("end") if "end" in sc else sc.get("end_time", s_start + float(sc.get("duration", 5.0))))
+            lyrics = sc.get("line") or sc.get("lyrics") or sc.get("dialogue") or f"Musical Adventure Scene {idx}"
+            if s_start >= total_duration_sec:
+                break
+            entry = f"{idx}\n{fmt_time(s_start)} --> {fmt_time(min(total_duration_sec, s_end))}\n{lyrics.strip()}\n"
+            srt_entries.append(entry)
+    else:
+        current_sec = 0.5
+        idx = 1
+        while current_sec < total_duration_sec:
+            sc = scenes[(idx - 1) % len(scenes)]
+            dur = float(sc.get("duration", 6.0))
+            end_sec = min(total_duration_sec, current_sec + dur - 0.5)
+            lyrics = sc.get("lyrics") or sc.get("dialogue") or f"Musical Adventure Scene {idx}"
 
-        entry = f"{idx}\n{fmt_time(current_sec)} --> {fmt_time(end_sec)}\n{lyrics}\n"
-        srt_entries.append(entry)
-        current_sec += dur
-        idx += 1
+            entry = f"{idx}\n{fmt_time(current_sec)} --> {fmt_time(end_sec)}\n{lyrics}\n"
+            srt_entries.append(entry)
+            current_sec += dur
+            idx += 1
 
     with open(output_srt, "w", encoding="utf-8") as f:
         f.write("\n".join(srt_entries))

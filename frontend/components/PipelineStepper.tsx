@@ -43,7 +43,7 @@ export function PipelineStepper({ status, step, progress }: PipelineStepperProps
     {
       id: "rendering",
       title: "4. Illustrated Story Engine",
-      desc: "Cocomelon-style kinetic animation",
+      desc: "Preschool Stylized kinetic animation",
       icon: Clapperboard,
       minProgress: 75,
     },

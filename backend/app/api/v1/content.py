@@ -54,10 +54,14 @@ async def generate_project_content_package(
         raise HTTPException(status_code=404, detail="Project not found")
 
     topic = project.topic or project.title
-    pkg = generate_content_package(
+    import asyncio
+    duration_mins = float(project.duration_min or 2.0)
+    pkg = await asyncio.to_thread(
+        generate_content_package,
         topic=topic,
         video_type=project.video_type,
         target_age=project.target_age,
+        duration_minutes=duration_mins,
     )
 
     # Persist in project
@@ -217,7 +221,8 @@ async def regenerate_lyrics_only(
         raise HTTPException(status_code=404, detail="Project not found")
 
     topic = project.topic or project.title
-    lyrics_data = generate_preschool_lyrics(topic)
+    import asyncio
+    lyrics_data = await asyncio.to_thread(generate_preschool_lyrics, topic)
 
     meta = dict(project.metadata_json or {})
     curr_pkg = dict(meta.get("content_package") or {})

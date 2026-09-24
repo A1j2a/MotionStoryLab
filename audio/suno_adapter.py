@@ -16,7 +16,7 @@ def format_suno_prompt(topic: str, lyrics_lines: List[str]) -> Dict[str, str]:
     clean_topic = topic.strip().capitalize()
     
     # Suno tags
-    prompt_text = f"[Genre: Preschool Children Pop, Cocomelon Style]\n[Tempo: 120 BPM, Bright Melodic]\n[Instruments: Glockenspiel, Acoustic Guitar, Warm Bass, Cheerful Clap]\n\n"
+    prompt_text = f"[Genre: Preschool Children Pop, Catchy Preschool Pop Style]\n[Tempo: 120 BPM, Bright Melodic]\n[Instruments: Glockenspiel, Acoustic Guitar, Warm Bass, Cheerful Clap]\n\n"
     
     if lyrics_lines:
         chunk_size = max(1, len(lyrics_lines) // 4)

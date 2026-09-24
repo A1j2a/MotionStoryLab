@@ -23,7 +23,7 @@ from app.repositories.job_repo import JobRepository
 from ai.storyboard_generator import generate_storyboard
 from ai.validator import validate_storyboard_scenes
 from renderer.storybook_engine import render_illustrated_scene
-from renderer.compositor import concatenate_scenes, composite_final_video, generate_thumbnail
+from renderer.compositor import concatenate_scenes, composite_final_video, generate_thumbnail, generate_high_ctr_thumbnail
 
 router = APIRouter(prefix="/projects", tags=["storyboard"])
 
@@ -94,6 +94,7 @@ async def generate_project_storyboard(
             lighting=s.get("lighting", {}) if isinstance(s.get("lighting"), dict) else {"type": str(s.get("lighting"))},
             dialogue=s.get("lyrics", ""),
             lyrics=s.get("lyrics", ""),
+            video_prompt=s.get("video_prompt") or s.get("prompt") or s.get("visual_prompt"),
             music=s.get("music", "120 BPM upbeat"),
             sound_effects=s.get("sound_effects", []),
             transition=s.get("transition", "cut"),
@@ -194,20 +195,38 @@ async def render_all_scenes_task(project_id: str):
         scene_mp4 = os.path.join(scenes_dir, f"scene_{idx:03d}.mp4")
         verse_lyrics = sc.lyrics or f"{project.topic} Fun Scene {idx}"
 
+        # 0. Check OpenRouter Video Engine (Seedance 2.0 / Kling / Luma)
+        video_engine_ok = False
+        try:
+            from app.api.v1.settings_api import get_db_config
+            from ai.providers import OpenRouterVideoProvider
+            db_video_on = get_db_config("OPENROUTER_VIDEO_ENABLED", "false").lower() in ("true", "1", "yes")
+            if db_video_on:
+                v_provider = OpenRouterVideoProvider()
+                prompt = f"3D Pixar cute animation, {project.topic or project.title}, preschool cartoon show, action: {verse_lyrics}, vibrant colors, smooth camera"
+                video_engine_ok = await asyncio.to_thread(
+                    v_provider.generate_and_download_video,
+                    prompt=prompt,
+                    output_path=scene_mp4,
+                )
+        except Exception as ve:
+            pass
+
         # 1. Render true 3D scene via Blender 5.2 Metal GPU engine
         blender_ok = False
-        try:
-            from renderer.blender_runner import render_blender_3d_scene
-            blender_ok = await asyncio.to_thread(
-                render_blender_3d_scene,
-                scene_number=idx,
-                topic=project.topic or project.title,
-                verse_text=verse_lyrics,
-                duration_sec=sc.duration or 5.0,
-                output_mp4=scene_mp4,
-            )
-        except Exception as be:
-            pass
+        if not video_engine_ok or not os.path.exists(scene_mp4) or os.path.getsize(scene_mp4) < 1000:
+            try:
+                from renderer.blender_runner import render_blender_3d_scene
+                blender_ok = await asyncio.to_thread(
+                    render_blender_3d_scene,
+                    scene_number=idx,
+                    topic=project.topic or project.title,
+                    verse_text=verse_lyrics,
+                    duration_sec=sc.duration or 5.0,
+                    output_mp4=scene_mp4,
+                )
+            except Exception as be:
+                pass
 
         # 2. Fallback to Illustrated Storybook Engine if Blender was unconfigured
         if not blender_ok or not os.path.exists(scene_mp4) or os.path.getsize(scene_mp4) < 1000:
@@ -276,9 +295,24 @@ async def assemble_final_video_task(project_id: str):
             db_j.progress = 85
         await session.commit()
 
+    proj_title = "Preschool Fun"
+    proj_topic = "Kids Song"
+    async with AsyncSessionLocal() as session:
+        p_fetch = await session.execute(select(Project).where(Project.id == project_id))
+        p_found = p_fetch.scalars().first()
+        if p_found:
+            proj_title = p_found.title
+            proj_topic = p_found.topic
+
     await asyncio.to_thread(concatenate_scenes, scene_files, merged_video, target_duration=60.0)
     await asyncio.to_thread(composite_final_video, merged_video, audio_path, final_video, subtitles_path=srt_path, target_duration=60.0)
-    await asyncio.to_thread(generate_thumbnail, final_video, thumbnail_path)
+    await asyncio.to_thread(
+        generate_high_ctr_thumbnail,
+        title=proj_title,
+        topic=proj_topic,
+        output_thumbnail_path=thumbnail_path,
+        video_path=final_video,
+    )
 
     async with AsyncSessionLocal() as session:
         session.add(Asset(project_id=project_id, asset_type="final_video", file_path=final_video))
@@ -299,6 +333,7 @@ async def assemble_final_video_task(project_id: str):
 
 
 @router.post("/{project_id}/render/scenes", status_code=status.HTTP_202_ACCEPTED)
+@router.post("/{project_id}/render-scenes", status_code=status.HTTP_202_ACCEPTED)
 async def trigger_scene_rendering(
     project_id: str,
     background_tasks: BackgroundTasks,

@@ -30,6 +30,9 @@ export function SeoHub({ projectId, initialSeo, onSeoUpdated }: SeoHubProps) {
   const [activeTitle, setActiveTitle] = useState("");
   const [activeDescription, setActiveDescription] = useState("");
   const [copiedSection, setCopiedSection] = useState<string | null>(null);
+  const [thumbAspect, setThumbAspect] = useState<string>("16:9");
+  const [generatingThumb, setGeneratingThumb] = useState(false);
+  const [thumbTimestamp, setThumbTimestamp] = useState(Date.now());
   const [saveSuccess, setSaveSuccess] = useState(false);
 
   const fetchSeo = async () => {
@@ -70,6 +73,18 @@ export function SeoHub({ projectId, initialSeo, onSeoUpdated }: SeoHubProps) {
       alert("SEO regeneration failed: " + err.message);
     } finally {
       setRegenerating(false);
+    }
+  };
+
+  const handleGenerateThumb = async () => {
+    setGeneratingThumb(true);
+    try {
+      await api.generateThumbnail(projectId, { aspect_ratio: thumbAspect });
+      setThumbTimestamp(Date.now());
+    } catch (err: any) {
+      alert("Failed to generate thumbnail: " + err.message);
+    } finally {
+      setGeneratingThumb(false);
     }
   };
 
@@ -286,28 +301,49 @@ export function SeoHub({ projectId, initialSeo, onSeoUpdated }: SeoHubProps) {
 
             {/* Thumbnail Poster */}
             <div className="space-y-2">
-              <label className="text-xs font-bold text-[#1D1D1F] flex items-center gap-1.5">
-                <ImageIcon className="w-3.5 h-3.5 text-[#FF6B00]" />
-                <span>Video Thumbnail</span>
-              </label>
-              <div className="aspect-video bg-[#FAFAFC] border border-[#E5E5EA] rounded-xl overflow-hidden relative group">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-[#1D1D1F] flex items-center gap-1.5">
+                  <ImageIcon className="w-3.5 h-3.5 text-[#FF6B00]" />
+                  <span>High-CTR YouTube Kids Thumbnail</span>
+                </label>
+                <div className="flex items-center gap-1.5">
+                  <select
+                    value={thumbAspect}
+                    onChange={(e) => setThumbAspect(e.target.value)}
+                    className="text-[10px] bg-[#FAFAFA] border border-[#E5E5EA] rounded-lg px-2 py-0.5 text-[#1D1D1F] cursor-pointer"
+                  >
+                    <option value="16:9">16:9 Widescreen</option>
+                    <option value="9:16">9:16 Shorts</option>
+                  </select>
+                  <button
+                    onClick={handleGenerateThumb}
+                    disabled={generatingThumb}
+                    className="text-[11px] font-bold text-[#EA580C] hover:text-[#C2410C] bg-[#FFF7ED] px-2.5 py-1 rounded-lg border border-[#FED7AA] flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                  >
+                    <Sparkles className="w-3 h-3" />
+                    <span>{generatingThumb ? "Rendering..." : "Generate High-CTR Cover"}</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="aspect-video bg-[#FAFAFC] border border-[#E5E5EA] rounded-xl overflow-hidden relative group flex items-center justify-center">
                 <img
-                  src={`http://127.0.0.1:8000/api/v1/projects/${projectId}/thumbnail`}
+                  key={thumbTimestamp}
+                  src={`http://127.0.0.1:8000/api/v1/projects/${projectId}/thumbnail?t=${thumbTimestamp}`}
                   alt="Thumbnail Preview"
                   className="w-full h-full object-cover"
                   onError={(e) => {
-                    // Fallback to placeholder if thumbnail not yet generated
                     (e.target as HTMLElement).style.display = "none";
                   }}
                 />
                 <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
                   <a
-                    href={`http://127.0.0.1:8000/api/v1/projects/${projectId}/thumbnail`}
+                    href={`http://127.0.0.1:8000/api/v1/projects/${projectId}/thumbnail?t=${thumbTimestamp}`}
                     download="thumbnail.jpg"
                     className="bg-white text-[#1D1D1F] px-3 py-1.5 rounded-lg text-xs font-semibold shadow-md flex items-center gap-1 hover:bg-[#F5F5F7]"
                   >
                     <Download className="w-3.5 h-3.5" />
-                    <span>Download</span>
+                    <span>Download Thumbnail</span>
                   </a>
                 </div>
               </div>

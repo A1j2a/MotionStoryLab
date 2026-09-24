@@ -30,6 +30,7 @@ class Scene(Base, TimestampMixin):
 
     dialogue: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     lyrics: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    video_prompt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     music: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     sound_effects: Mapped[Optional[List[str]]] = mapped_column(JSON, default=list)
     transition: Mapped[Optional[str]] = mapped_column(String(64), default="cut", nullable=True)
