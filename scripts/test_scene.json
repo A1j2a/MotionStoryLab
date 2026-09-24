@@ -1,0 +1,11 @@
+{
+  "scene_number": 1,
+  "duration": 2.0,
+  "fps": 24,
+  "res_x": 640,
+  "res_y": 360,
+  "environment": "Sunny Green Meadow",
+  "characters": ["Toto the Train", "Daisy Cow"],
+  "actions": ["drive", "wave"],
+  "output_path": "/Users/dd-mac-04/Desktop/MotionStoryLabs/youtube-ai-studio/projects/test_output.mp4"
+}

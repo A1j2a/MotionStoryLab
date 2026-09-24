@@ -1,36 +1,150 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+# ==============================================================================
+# MotionStoryLab / YouTube AI Studio - Git Ignore Configuration
+# ==============================================================================
 
-# dependencies
-/node_modules
-/.pnp
-.pnp.js
-
-# testing
-/coverage
-
-# next.js
-/.next/
-/out/
-
-# production
-/build
-
-# misc
-.DS_Store
+# ------------------------------------------------------------------------------
+# 1. Environment & Configuration
+# Tracked for multi-machine deployment as requested
+# ------------------------------------------------------------------------------
+!.env
+!.env.example
+.env*.local
 *.pem
 
-# debug
+# ------------------------------------------------------------------------------
+# 2. Python & Virtual Environments
+# ------------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+.Python
+develop-eggs/
+downloads/
+eggs/
+.eggs/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments (macOS / Linux / Windows)
+.venv/
+backend/.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Pytest / Coverage / Linters
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+.mypy_cache/
+.ruff_cache/
+
+# ------------------------------------------------------------------------------
+# 3. Node.js & Next.js Frontend
+# ------------------------------------------------------------------------------
+node_modules/
+frontend/node_modules/
+.pnp/
+.pnp.js
+
+# Build and export outputs
+.next/
+frontend/.next/
+out/
+frontend/out/
+build/
+frontend/build/
+dist/
+frontend/dist/
+*.tsbuildinfo
+
+# Allow source directories
+!frontend/lib/
+
+# Package manager debug logs
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
 
-# local env files
-.env*.local
-.env
+# ------------------------------------------------------------------------------
+# 4. Project Runtime Data, Generated Media & Local Database
+# ------------------------------------------------------------------------------
+# SQLite databases (generated at runtime by backend)
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-wal
+*.db-shm
+projects/*.db
+backend/*.db
 
-# vercel
-.vercel
+# Generated Projects media (avoid pushing heavy binary videos/audio)
+projects/*
+!projects/.gitkeep
+projects/**/scenes/*.mp4
+projects/**/scenes/*.png
+projects/**/audio/*.wav
+projects/**/audio/*.mp3
+projects/**/final.mp4
+projects/*.wav
+projects/*.mp4
 
-# typescript
-*.tsbuildinfo
-next-env.d.ts
+# Logs & PID files
+logs/*
+!logs/.gitkeep
+!logs/pids/
+!logs/pids/.gitkeep
+*.log
+*.pid
+logs/*.log
+logs/*.pid
+logs/pids/*.pid
+
+# ------------------------------------------------------------------------------
+# 5. Blender 3D Backups & Temp Files
+# ------------------------------------------------------------------------------
+*.blend1
+*.blend2
+*.blend@*
+*.blend.crash
+*.blend.save
+
+# ------------------------------------------------------------------------------
+# 6. Operating System & IDE Configurations
+# ------------------------------------------------------------------------------
+# macOS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+
+# Windows
+Thumbs.db
+ehthumbs.db
+[Dd]esktop.ini
+
+# Editors & IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.vercel/

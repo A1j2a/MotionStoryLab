@@ -1,0 +1,606 @@
+"use client";
+
+import { useEffect, useState, useRef } from "react";
+import Link from "next/link";
+import { Header } from "@/components/Header";
+import { TopicDiscovery } from "@/components/TopicDiscovery";
+import { ContentPackageEditor } from "@/components/ContentPackageEditor";
+import { StoryboardView } from "@/components/StoryboardView";
+import { QCCheckView } from "@/components/QCCheckView";
+import { api } from "@/lib/api";
+import {
+  Project,
+  DashboardStats,
+  TopicOpportunity,
+  ContentPackage,
+  Scene,
+  AudioTimeline,
+  QCResult,
+} from "@/lib/types";
+import {
+  Film,
+  Sparkles,
+  Clapperboard,
+  HardDrive,
+  ArrowRight,
+  PlusCircle,
+  Play,
+  Pause,
+  Clock,
+  CheckCircle2,
+  Terminal,
+  RotateCcw,
+  Music,
+  ShieldCheck,
+  UploadCloud,
+  FileVideo,
+  Download,
+  Loader2,
+  ChevronRight,
+  Flame,
+} from "lucide-react";
+
+export default function DashboardPage() {
+  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // Active workflow state
+  const [activeProject, setActiveProject] = useState<Project | null>(null);
+  const [contentPkg, setContentPkg] = useState<ContentPackage | null>(null);
+  const [audioTimeline, setAudioTimeline] = useState<AudioTimeline | null>(null);
+  const [scenes, setScenes] = useState<Scene[]>([]);
+  const [qcResult, setQcResult] = useState<QCResult | null>(null);
+
+  // Workflow progress actions
+  const [songLoading, setSongLoading] = useState(false);
+  const [renderLoading, setRenderLoading] = useState(false);
+  const [qcLoading, setQcLoading] = useState(false);
+  const [uploadLoading, setUploadLoading] = useState(false);
+  const [uploadSuccess, setUploadSuccess] = useState<string | null>(null);
+
+  // Audio player state
+  const [isPlayingAudio, setIsPlayingAudio] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  const loadDashboardData = async () => {
+    try {
+      const [statsData, projectsData] = await Promise.all([
+        api.getDashboardStats(),
+        api.getProjects(),
+      ]);
+      setStats(statsData);
+      setProjects(projectsData);
+    } catch (err) {
+      console.error("Failed to load dashboard data:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadDashboardData();
+  }, []);
+
+  // Poll active project when processing
+  useEffect(() => {
+    if (!activeProject) return;
+    const isProcessing =
+      activeProject.status === "PROCESSING" ||
+      (activeProject.jobs &&
+        activeProject.jobs.length > 0 &&
+        ["PLANNING", "AUDIO_GENERATION", "RENDERING", "COMPOSITING", "SCENE_RENDERING"].includes(
+          activeProject.jobs[0].status
+        ));
+
+    if (!isProcessing) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const p = await api.getProject(activeProject.id);
+        setActiveProject(p);
+        if (p.scenes) setScenes(p.scenes);
+      } catch {
+        // ignore
+      }
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [activeProject]);
+
+  // Step 1: Handle selecting topic
+  const handleSelectTopic = async (topic: TopicOpportunity) => {
+    try {
+      const project = await api.selectTopic({
+        topic: topic.topic,
+        title: topic.suggested_title,
+        category: topic.category,
+        target_age: topic.target_age,
+        content_angle: topic.content_angle,
+        why_worth_considering: topic.why_worth_considering,
+        opportunity_signals: topic.opportunity_signals,
+        suggested_characters: topic.suggested_characters,
+        suggested_story_concept: topic.suggested_story_concept,
+      });
+
+      setActiveProject(project);
+
+      // Auto-fetch/generate content package
+      const pkg = await api.generateContentPackage(project.id);
+      setContentPkg(pkg);
+
+      // Refresh project list in background
+      loadDashboardData();
+    } catch (err: any) {
+      alert("Failed to initialize project from topic: " + err.message);
+    }
+  };
+
+  // Step 3: Trigger Song Generation from exact approved lyrics
+  const handleGenerateSong = async () => {
+    if (!activeProject) return;
+    setSongLoading(true);
+    try {
+      await api.generateSong(activeProject.id);
+      // Wait for audio synthesis & analysis to complete
+      let attempts = 0;
+      const poll = setInterval(async () => {
+        attempts++;
+        try {
+          const timeline = await api.getAudioTimeline(activeProject.id);
+          if (timeline && timeline.sections && timeline.sections.length > 0) {
+            setAudioTimeline(timeline);
+            clearInterval(poll);
+            setSongLoading(false);
+
+            // Auto generate storyboard scenes
+            const sbScenes = await api.generateStoryboard(activeProject.id);
+            setScenes(sbScenes);
+          }
+        } catch {
+          // keep polling
+        }
+        if (attempts > 20) {
+          clearInterval(poll);
+          setSongLoading(false);
+        }
+      }, 2500);
+    } catch (err: any) {
+      alert("Song generation failed: " + err.message);
+      setSongLoading(false);
+    }
+  };
+
+  // Step 5 & 6: Render 3D Scenes
+  const handleRenderScenes = async () => {
+    if (!activeProject) return;
+    setRenderLoading(true);
+    try {
+      await api.renderScenes(activeProject.id);
+      setTimeout(async () => {
+        const p = await api.getProject(activeProject.id);
+        setActiveProject(p);
+        if (p.scenes) setScenes(p.scenes);
+        setRenderLoading(false);
+      }, 3000);
+    } catch (err: any) {
+      alert("Scene rendering failed: " + err.message);
+      setRenderLoading(false);
+    }
+  };
+
+  // Step 8: Quality Control Check
+  const handleRunQC = async () => {
+    if (!activeProject) return;
+    setQcLoading(true);
+    try {
+      const res = await api.runQC(activeProject.id);
+      setQcResult(res);
+    } catch (err: any) {
+      alert("QC check failed: " + err.message);
+    } finally {
+      setQcLoading(false);
+    }
+  };
+
+  // Step 10: Private YouTube Upload
+  const handleYouTubeUpload = async () => {
+    if (!activeProject) return;
+    setUploadLoading(true);
+    setUploadSuccess(null);
+    try {
+      const res = await api.uploadYouTube(activeProject.id, "private");
+      setUploadSuccess(res.message || "Video uploaded strictly in PRIVATE mode.");
+    } catch (err: any) {
+      alert("YouTube upload failed: " + err.message);
+    } finally {
+      setUploadLoading(false);
+    }
+  };
+
+  const toggleAudioPlayback = () => {
+    if (!audioRef.current) return;
+    if (isPlayingAudio) {
+      audioRef.current.pause();
+      setIsPlayingAudio(false);
+    } else {
+      audioRef.current.play();
+      setIsPlayingAudio(true);
+    }
+  };
+
+  return (
+    <>
+      <Header
+        title="AI Kids Video Production Studio"
+        subtitle="10-Step Automated 3D Kids & Nursery Rhyme Production Workflow"
+      />
+
+      <main className="p-8 space-y-8 flex-1 max-w-6xl mx-auto w-full">
+        {/* Studio Stats Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="bg-white border border-[#E5E5EA] rounded-2xl p-5 shadow-xs space-y-2">
+            <div className="flex items-center justify-between text-[#6E6E73]">
+              <span className="text-xs font-bold uppercase tracking-wider">Total Productions</span>
+              <Film className="w-4 h-4 text-[#FF6B00]" />
+            </div>
+            <div className="text-2xl font-extrabold text-[#1D1D1F]">
+              {stats?.total_projects || projects.length}
+            </div>
+            <p className="text-[11px] text-[#86868B]">In local SQLite studio DB</p>
+          </div>
+
+          <div className="bg-white border border-[#E5E5EA] rounded-2xl p-5 shadow-xs space-y-2">
+            <div className="flex items-center justify-between text-[#6E6E73]">
+              <span className="text-xs font-bold uppercase tracking-wider">Active Jobs</span>
+              <Sparkles className="w-4 h-4 text-[#FF6B00]" />
+            </div>
+            <div className="text-2xl font-extrabold text-[#1D1D1F]">
+              {stats?.active_jobs || 0}
+            </div>
+            <p className="text-[11px] text-[#86868B]">Sequential M4 background jobs</p>
+          </div>
+
+          <div className="bg-white border border-[#E5E5EA] rounded-2xl p-5 shadow-xs space-y-2">
+            <div className="flex items-center justify-between text-[#6E6E73]">
+              <span className="text-xs font-bold uppercase tracking-wider">3D Scenes Rendered</span>
+              <Clapperboard className="w-4 h-4 text-[#FF6B00]" />
+            </div>
+            <div className="text-2xl font-extrabold text-[#1D1D1F]">
+              {stats?.completed_scenes || scenes.filter((s) => s.status === "COMPLETED").length}
+            </div>
+            <p className="text-[11px] text-emerald-600 font-semibold">100% locally on Blender 5.2</p>
+          </div>
+
+          <div className="bg-white border border-[#E5E5EA] rounded-2xl p-5 shadow-xs space-y-2">
+            <div className="flex items-center justify-between text-[#6E6E73]">
+              <span className="text-xs font-bold uppercase tracking-wider">Disk Storage</span>
+              <HardDrive className="w-4 h-4 text-[#FF6B00]" />
+            </div>
+            <div className="text-2xl font-extrabold text-[#1D1D1F]">
+              {stats ? `${stats.storage_used_mb} MB` : "14.2 MB"}
+            </div>
+            <p className="text-[11px] text-[#86868B]">Local /projects media storage</p>
+          </div>
+        </div>
+
+        {/* STEP 1: DISCOVER TOPICS */}
+        <section className="space-y-4">
+          <TopicDiscovery onSelectTopic={handleSelectTopic} />
+        </section>
+
+        {/* STEP 2 & 4: CONTENT PACKAGE & APPROVED LYRICS (SOURCE OF TRUTH) */}
+        {activeProject && contentPkg && (
+          <section className="space-y-4">
+            <ContentPackageEditor
+              projectId={activeProject.id}
+              initialPackage={contentPkg}
+              onSaved={(saved) => setContentPkg(saved)}
+            />
+          </section>
+        )}
+
+        {/* STEP 3 & 7: GENERATE SONG FROM EXACT APPROVED LYRICS */}
+        {activeProject && (
+          <section className="bg-white border border-[#E5E5EA] rounded-3xl p-6 shadow-xs space-y-5">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-[#E5E5EA]">
+              <div className="space-y-1">
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200">
+                  <Music className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Step 3 • Song Generation & Audio Analysis</span>
+                </div>
+                <h2 className="text-lg font-bold text-[#1D1D1F]">
+                  Generate Master Song from Exact Approved Lyrics
+                </h2>
+                <p className="text-xs text-[#6E6E73]">
+                  Synthesizes the vocal melody and extracts exact BPM, section divisions, and lyric timestamps for scene alignment.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={handleGenerateSong}
+                  disabled={songLoading}
+                  className="inline-flex items-center gap-2 bg-gradient-to-r from-[#FF6B00] to-[#EA580C] hover:opacity-95 text-white text-xs font-bold px-5 py-2.5 rounded-xl shadow-md shadow-orange-500/20 transition-all cursor-pointer disabled:opacity-50"
+                >
+                  {songLoading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Synthesizing Song...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Music className="w-4 h-4" />
+                      <span>Generate Song</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* Audio Player & Analyzed Timeline Display */}
+            {audioTimeline && (
+              <div className="p-4.5 bg-[#FAFAFC] border border-[#E5E5EA] rounded-2xl space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={toggleAudioPlayback}
+                      className="w-10 h-10 rounded-full bg-orange-500 hover:bg-orange-600 text-white flex items-center justify-center shadow-md transition-colors cursor-pointer shrink-0"
+                    >
+                      {isPlayingAudio ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
+                    </button>
+                    <div>
+                      <span className="font-bold text-xs text-[#1D1D1F] block">
+                        Master Nursery Song ({audioTimeline.duration.toFixed(1)}s)
+                      </span>
+                      <span className="text-[11px] text-[#6E6E73]">
+                        BPM: {audioTimeline.bpm} • {audioTimeline.sections.length} Sections • Synchronized to Lyrics
+                      </span>
+                    </div>
+                  </div>
+
+                  <audio
+                    ref={audioRef}
+                    src={api.getSongAudioUrl(activeProject.id)}
+                    onEnded={() => setIsPlayingAudio(false)}
+                    className="hidden"
+                  />
+
+                  <div className="flex items-center gap-2 text-xs font-semibold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-200">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Audio Timeline Analyzed</span>
+                  </div>
+                </div>
+
+                {/* Visual Audio Sections Waveform Bar */}
+                <div className="space-y-1.5">
+                  <span className="text-[10px] font-bold text-[#86868B] uppercase tracking-wider">
+                    Musical Section Map
+                  </span>
+                  <div className="w-full h-8 bg-white border border-[#E5E5EA] rounded-xl overflow-hidden flex">
+                    {audioTimeline.sections.map((sec, idx) => {
+                      const widthPct = ((sec.end - sec.start) / audioTimeline.duration) * 100;
+                      const colors = ["bg-orange-100 text-orange-800", "bg-blue-100 text-blue-800", "bg-emerald-100 text-emerald-800", "bg-purple-100 text-purple-800"];
+                      return (
+                        <div
+                          key={idx}
+                          style={{ width: `${widthPct}%` }}
+                          className={`h-full border-r border-white flex items-center justify-center text-[10px] font-bold truncate px-1 ${
+                            colors[idx % colors.length]
+                          }`}
+                          title={`${sec.name} (${sec.start.toFixed(1)}s - ${sec.end.toFixed(1)}s)`}
+                        >
+                          {sec.name}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
+          </section>
+        )}
+
+        {/* STEP 4 & 5: STORYBOARD & 3D SCENE RENDERING */}
+        {activeProject && scenes.length > 0 && (
+          <section className="space-y-4">
+            <StoryboardView
+              projectId={activeProject.id}
+              scenes={scenes}
+              onSceneRerendered={async () => {
+                const p = await api.getProject(activeProject.id);
+                setActiveProject(p);
+                if (p.scenes) setScenes(p.scenes);
+              }}
+            />
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                onClick={handleRenderScenes}
+                disabled={renderLoading}
+                className="inline-flex items-center gap-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:opacity-95 text-white text-xs font-bold px-6 py-3 rounded-xl shadow-md shadow-blue-500/20 transition-all cursor-pointer disabled:opacity-50"
+              >
+                {renderLoading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Rendering 3D Scenes...</span>
+                  </>
+                ) : (
+                  <>
+                    <Clapperboard className="w-4 h-4" />
+                    <span>Render All 3D Scenes ({scenes.length} Shots)</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </section>
+        )}
+
+        {/* STEP 8: QUALITY CONTROL (QC) */}
+        {activeProject && (
+          <section className="space-y-4">
+            <QCCheckView
+              qcResult={qcResult}
+              onRerunQC={handleRunQC}
+              loading={qcLoading}
+            />
+          </section>
+        )}
+
+        {/* STEP 9 & 10: PREVIEW, APPROVE, AND YOUTUBE PRIVATE UPLOAD */}
+        {activeProject && (
+          <section className="bg-white border border-[#E5E5EA] rounded-3xl p-6 shadow-xs space-y-6">
+            <div className="space-y-1 pb-4 border-b border-[#E5E5EA]">
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                <FileVideo className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Step 9 & 10 • Final Preview & YouTube Upload</span>
+              </div>
+              <h2 className="text-lg font-bold text-[#1D1D1F]">
+                Video Preview & Distribution
+              </h2>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+              {/* Video Player */}
+              <div className="rounded-2xl overflow-hidden bg-black aspect-video relative flex items-center justify-center border border-[#E5E5EA]">
+                <video
+                  controls
+                  className="w-full h-full object-cover"
+                  src={`http://127.0.0.1:8000/api/v1/projects/${activeProject.id}/video`}
+                  poster={`http://127.0.0.1:8000/api/v1/projects/${activeProject.id}/thumbnail`}
+                >
+                  Your browser does not support the video tag.
+                </video>
+              </div>
+
+              {/* Approval & Upload Actions */}
+              <div className="space-y-5">
+                <div className="space-y-2">
+                  <h3 className="font-extrabold text-base text-[#1D1D1F]">{activeProject.title}</h3>
+                  <p className="text-xs text-[#6E6E73] leading-relaxed">{activeProject.topic}</p>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-[#FAFAFC] border border-[#E5E5EA] space-y-2 text-xs text-[#6E6E73]">
+                  <div className="flex items-center justify-between text-[#1D1D1F] font-bold">
+                    <span>Upload Status:</span>
+                    <span className="text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full text-[10px]">
+                      Strictly PRIVATE Default
+                    </span>
+                  </div>
+                  <p className="text-[11px]">
+                    All initial YouTube uploads are set to PRIVATE for safe creator review in YouTube Studio before public release.
+                  </p>
+                </div>
+
+                {uploadSuccess && (
+                  <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-800 font-semibold flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>{uploadSuccess}</span>
+                  </div>
+                )}
+
+                <div className="flex flex-wrap items-center gap-3 pt-2">
+                  <a
+                    href={`http://127.0.0.1:8000/api/v1/projects/${activeProject.id}/video`}
+                    download
+                    className="inline-flex items-center gap-2 bg-[#FAFAFC] hover:bg-[#F5F5F7] text-[#1D1D1F] border border-[#E5E5EA] text-xs font-bold px-5 py-3 rounded-xl transition-colors cursor-pointer"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>Download Final MP4</span>
+                  </a>
+
+                  <button
+                    onClick={handleYouTubeUpload}
+                    disabled={uploadLoading}
+                    className="inline-flex items-center gap-2 bg-gradient-to-r from-red-600 to-rose-600 hover:opacity-95 text-white text-xs font-bold px-6 py-3 rounded-xl shadow-md shadow-red-500/20 transition-all cursor-pointer disabled:opacity-50"
+                  >
+                    {uploadLoading ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Uploading to YouTube (Private)...</span>
+                      </>
+                    ) : (
+                      <>
+                        <UploadCloud className="w-4 h-4" />
+                        <span>Upload to YouTube (Private)</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {/* Existing Projects List */}
+        <div className="space-y-4 pt-6 border-t border-[#E5E5EA]">
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-bold text-[#1D1D1F] tracking-tight">
+              Recent Studio Productions
+            </h2>
+            <Link
+              href="/projects"
+              className="text-xs font-semibold text-[#EA580C] hover:underline flex items-center gap-1 cursor-pointer"
+            >
+              <span>Manage all projects</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
+          </div>
+
+          {loading ? (
+            <div className="p-8 text-center text-xs text-[#6E6E73]">Loading projects...</div>
+          ) : projects.length === 0 ? (
+            <div className="bg-white border border-[#E5E5EA] rounded-2xl p-12 text-center text-xs text-[#6E6E73] shadow-xs">
+              No productions created yet. Click &ldquo;🔥 Find Today&apos;s Kids Topics&rdquo; above to start!
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {projects.map((proj) => (
+                <div
+                  key={proj.id}
+                  onClick={() => {
+                    setActiveProject(proj);
+                    api.getContentPackage(proj.id).then(setContentPkg).catch(() => {});
+                    api.getAudioTimeline(proj.id).then(setAudioTimeline).catch(() => {});
+                    if (proj.scenes) setScenes(proj.scenes);
+                  }}
+                  className={`bg-white hover:bg-[#FAFAFC] border rounded-2xl p-5 transition-all shadow-xs group block space-y-3 cursor-pointer ${
+                    activeProject?.id === proj.id ? "border-[#FF6B00] ring-2 ring-orange-500/20" : "border-[#E5E5EA]"
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-[#FFF7ED] text-[#C2410C] border border-[#FED7AA]">
+                      {proj.status}
+                    </span>
+                    <span className="text-[11px] text-[#86868B] font-medium flex items-center gap-1">
+                      <Clock className="w-3 h-3" />
+                      {new Date(proj.created_at).toLocaleDateString()}
+                    </span>
+                  </div>
+
+                  <div>
+                    <h3 className="font-bold text-[#1D1D1F] text-base group-hover:text-[#EA580C] transition-colors">
+                      {proj.title}
+                    </h3>
+                    <p className="text-xs text-[#6E6E73] line-clamp-2 mt-1 leading-relaxed">
+                      {proj.topic}
+                    </p>
+                  </div>
+
+                  <div className="pt-2 border-t border-[#E5E5EA] flex items-center justify-between text-xs text-[#6E6E73]">
+                    <span>
+                      {proj.video_type} • {proj.visual_style}
+                    </span>
+                    <span className="text-[#EA580C] font-semibold flex items-center gap-1 group-hover:translate-x-1 transition-transform">
+                      Load Into Studio →
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </main>
+    </>
+  );
+}
