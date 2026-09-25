@@ -16,11 +16,13 @@ import {
   Terminal,
   Sparkles,
   Layers,
+  UploadCloud,
 } from "lucide-react";
 import { HealthStatus } from "./HealthStatus";
 
 const NAV_ITEMS = [
   { href: "/", label: "Studio Dashboard (10-Step)", icon: LayoutDashboard, highlight: true },
+  { href: "/studio", label: "🎬 Manual Workflow Studio", icon: UploadCloud, highlight: false },
   { href: "/projects", label: "Projects", icon: Film },
   { href: "/workflow", label: "Engine Workflow", icon: Layers },
   { href: "/scenes", label: "Scene Editor", icon: Clapperboard },

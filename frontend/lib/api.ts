@@ -262,6 +262,15 @@ export const api = {
     request<SeoData>(`/api/v1/projects/${projectId}/seo/regenerate`, {
       method: "POST",
     }),
+  generateManualSeo: (projectId: string, topic?: string) =>
+    request<{ title: string; description: string; tags: string; caption: string }>(
+      `/api/v1/projects/${projectId}/seo/generate`,
+      { method: "POST", body: JSON.stringify({ topic }) }
+    ),
+  getManualSeo: (projectId: string) =>
+    request<{ title: string; description: string; tags: string; caption: string }>(
+      `/api/v1/projects/${projectId}/seo`
+    ),
 
   // Projects
   getProjects: (params?: any) => {
@@ -387,4 +396,110 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }, 30000),
+
+  // ── Manual External Generation Workflow ──────────────────────────────────
+
+  markSceneCopied: (projectId: string, sceneId: string) =>
+    request<{ scene_id: string; scene_number: number; prompt_status: string; prompt_copied_at: string }>(
+      `/api/v1/projects/${projectId}/scenes/${sceneId}/mark-copied`,
+      { method: "POST" }
+    ),
+
+  getCopyStatus: (projectId: string) =>
+    request<{
+      total_scenes: number;
+      copied_count: number;
+      uploaded_count: number;
+      scenes: Array<{
+        scene_id: string;
+        scene_number: number;
+        prompt_status: string;
+        prompt_copied_at: string | null;
+        uploaded_file: string | null;
+        uploaded_duration: number | null;
+        scene_order: number;
+        lyrics: string | null;
+        duration: number;
+      }>;
+    }>(`/api/v1/projects/${projectId}/scenes/copy-status`),
+
+  uploadSceneVideo: async (
+    projectId: string,
+    sceneId: string,
+    file: File,
+    forceReplace = false
+  ) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("force_replace", String(forceReplace));
+    const res = await fetch(
+      `${API_BASE}/api/v1/projects/${projectId}/scenes/${sceneId}/upload-video`,
+      { method: "POST", body: formData }
+    );
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: "Upload failed" }));
+      throw new Error(err.detail || "Upload failed");
+    }
+    return res.json();
+  },
+
+  batchUploadScenes: async (projectId: string, files: File[]) => {
+    const formData = new FormData();
+    files.forEach((f) => formData.append("files", f));
+    const res = await fetch(
+      `${API_BASE}/api/v1/projects/${projectId}/scenes/batch-upload`,
+      { method: "POST", body: formData }
+    );
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: "Batch upload failed" }));
+      throw new Error(err.detail || "Batch upload failed");
+    }
+    return res.json();
+  },
+
+  assignUnresolvedVideo: async (
+    projectId: string,
+    sceneNumber: number,
+    tmpPath: string,
+    forceReplace = false
+  ) => {
+    const formData = new FormData();
+    formData.append("scene_number", String(sceneNumber));
+    formData.append("tmp_path", tmpPath);
+    formData.append("force_replace", String(forceReplace));
+    const res = await fetch(
+      `${API_BASE}/api/v1/projects/${projectId}/scenes/assign-video`,
+      { method: "POST", body: formData }
+    );
+    if (!res.ok) throw new Error("Assignment failed");
+    return res.json();
+  },
+
+  confirmSceneSequence: (projectId: string, sceneOrder: number[]) =>
+    request<{ confirmed: boolean; sequence: number[]; message: string }>(
+      `/api/v1/projects/${projectId}/scenes/confirm-sequence`,
+      { method: "POST", body: JSON.stringify({ scene_order: sceneOrder }) }
+    ),
+
+  checkAssemblyReadiness: (projectId: string) =>
+    request<{
+      ready: boolean;
+      total_scenes: number;
+      uploaded_scenes: number;
+      missing_scenes: number[];
+      audio_available: boolean;
+      srt_available: boolean;
+      sequence_confirmed: boolean;
+    }>(`/api/v1/projects/${projectId}/assembly/readiness`),
+
+  generateFinalVideoFromUploads: (projectId: string) =>
+    request<{ status: string; final_video: string; duration: number; message: string }>(
+      `/api/v1/projects/${projectId}/assembly/generate-final-video`,
+      { method: "POST" },
+      600000  // 10 min timeout for large videos
+    ),
+
+  getFinalVideoUrl: (projectId: string) =>
+    `${API_BASE}/api/v1/projects/${projectId}/assembly/final-video`,
 };
+

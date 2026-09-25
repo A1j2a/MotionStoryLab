@@ -253,6 +253,12 @@ export interface Scene {
   start_frame?: string | null;
   end_frame?: string | null;
   video_url?: string | null;
+  // Manual external generation workflow
+  prompt_status?: string | null;  // NOT_COPIED | PROMPT_COPIED | VIDEO_UPLOADED | ORDER_CONFIRMED | FAILED
+  prompt_copied_at?: string | null;
+  uploaded_file?: string | null;
+  uploaded_duration?: number | null;
+  scene_order?: number | null;
   created_at: string;
   updated_at: string;
 }

@@ -56,4 +56,11 @@ class Scene(Base, TimestampMixin):
     local_video_path: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    # Manual External Generation Workflow fields (no-AI-video-gen workflow)
+    prompt_status: Mapped[Optional[str]] = mapped_column(String(32), default="NOT_COPIED", nullable=True)  # NOT_COPIED | PROMPT_COPIED | VIDEO_UPLOADED | ORDER_CONFIRMED | FAILED
+    prompt_copied_at: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    uploaded_file: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    uploaded_duration: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    scene_order: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
     project: Mapped["Project"] = relationship("Project", back_populates="scenes")

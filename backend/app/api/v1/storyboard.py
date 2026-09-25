@@ -85,13 +85,20 @@ async def generate_project_storyboard(
         target_scene_duration=target_dur,
     )
 
-    # Save scenes in DB
+    # Save scenes in DB — clamp each duration to the selected target_dur
     await session.execute(delete(Scene).where(Scene.project_id == project_id))
     for s in scenes_data:
+        raw_dur = float(s.get("duration", target_dur))
+        # Clamp: never let scene be more than 1s over or under the user-selected target
+        clamped_dur = max(target_dur - 1.0, min(target_dur + 1.0, raw_dur))
+        clamped_dur = max(4.0, clamped_dur)  # absolute minimum 4s
+
         scene_obj = Scene(
             project_id=project_id,
             scene_number=s.get("scene_number", 1),
-            duration=float(s.get("duration", 6.0)),
+            duration=clamped_dur,
+            start_time=s.get("start_time"),
+            end_time=s.get("end_time"),
             environment=s.get("environment", {}).get("name", "Preschool Environment") if isinstance(s.get("environment"), dict) else str(s.get("environment")),
             characters=[c.get("character_id", c.get("name", "hero")) if isinstance(c, dict) else str(c) for c in s.get("characters", [])],
             actions=s.get("actions", []),
@@ -106,6 +113,7 @@ async def generate_project_storyboard(
             status="PENDING",
         )
         session.add(scene_obj)
+
 
     # Update Job to STORYBOARD_READY
     jobs = await job_repo.list_by_project(project_id)

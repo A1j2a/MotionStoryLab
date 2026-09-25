@@ -42,6 +42,12 @@ async def init_db():
                     ("video_url", "VARCHAR(512)"),
                     ("local_video_path", "VARCHAR(512)"),
                     ("error_message", "TEXT"),
+                    # Manual external generation workflow columns
+                    ("prompt_status", "VARCHAR(32) DEFAULT 'NOT_COPIED'"),
+                    ("prompt_copied_at", "VARCHAR(64)"),
+                    ("uploaded_file", "VARCHAR(512)"),
+                    ("uploaded_duration", "FLOAT"),
+                    ("scene_order", "INTEGER"),
                 ]
                 for col_name, col_type in new_columns:
                     if col_name not in existing_cols:

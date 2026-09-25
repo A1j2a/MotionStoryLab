@@ -17,6 +17,7 @@ from app.api.v1.audio_flow import router as audio_flow_router
 from app.api.v1.storyboard import router as storyboard_router
 from app.api.v1.qc import router as qc_router
 from app.api.v1.youtube import router as youtube_router
+from app.api.v1.manual_workflow import router as manual_workflow_router
 
 api_router = APIRouter()
 
@@ -26,6 +27,7 @@ api_router.include_router(audio_flow_router)
 api_router.include_router(storyboard_router)
 api_router.include_router(qc_router)
 api_router.include_router(youtube_router)
+api_router.include_router(manual_workflow_router)
 
 api_router.include_router(settings_router)
 api_router.include_router(services_router)
