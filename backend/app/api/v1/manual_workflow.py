@@ -6,6 +6,7 @@ NO AI video-generation calls — user generates videos externally (e.g. Google F
 import os
 import re
 import sys
+import shutil
 import asyncio
 import logging
 import subprocess
@@ -535,15 +536,30 @@ async def generate_final_video_from_uploads(
     output_dir.mkdir(parents=True, exist_ok=True)
     final_video = output_dir / "final_video.mp4"
 
-    # Find audio
-    audio_path = project_dir / "audio" / "song.mp3"
-    alt_audio = project_dir / "audio" / "song.wav"
-    audio_file = str(audio_path) if audio_path.exists() else (str(alt_audio) if alt_audio.exists() else None)
+    # Find audio robustly (master_soundtrack.wav, song.mp3, etc.)
+    audio_file = None
+    for cand_name in ["master_soundtrack.wav", "song.mp3", "song.wav", "full_song.mp3", "full_song.wav"]:
+        cand_p = project_dir / "audio" / cand_name
+        if cand_p.exists():
+            audio_file = str(cand_p)
+            break
+    if not audio_file:
+        for ext in ("*.wav", "*.mp3", "*.m4a", "*.aac", "*.ogg"):
+            audio_matches = list((project_dir / "audio").glob(ext)) or list(project_dir.glob(ext))
+            if audio_matches:
+                audio_file = str(audio_matches[0])
+                break
 
-    # Find SRT
-    srt_path = project_dir / "subtitles.srt"
-    alt_srt = project_dir / "audio" / "lyrics.srt"
-    srt_file = str(srt_path) if srt_path.exists() else (str(alt_srt) if alt_srt.exists() else None)
+    # Find SRT robustly
+    srt_file = None
+    for cand_srt in [project_dir / "subtitles.srt", project_dir / "audio" / "subtitles.srt", project_dir / "audio" / "lyrics.srt"]:
+        if cand_srt.exists():
+            srt_file = str(cand_srt)
+            break
+    if not srt_file:
+        srt_matches = list(project_dir.glob("*.srt")) or list((project_dir / "audio").glob("*.srt"))
+        if srt_matches:
+            srt_file = str(srt_matches[0])
 
     # Build ordered list of uploaded scene video paths
     scene_video_paths = [Path(s.uploaded_file) for s in scenes]
@@ -590,6 +606,8 @@ def _assemble_final_video(
     """
     import tempfile
 
+    ffmpeg_bin = shutil.which("ffmpeg") or "/opt/homebrew/bin/ffmpeg" or "/usr/local/bin/ffmpeg" or "ffmpeg"
+
     # Write concat list
     with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
         for p in scene_video_paths:
@@ -599,7 +617,7 @@ def _assemble_final_video(
     # Step 1: Concatenate all scenes (re-encode to ensure compatibility)
     concat_output = output_path.parent / "scenes_concat.mp4"
     concat_cmd = [
-        "ffmpeg", "-y",
+        ffmpeg_bin, "-y",
         "-f", "concat", "-safe", "0",
         "-i", concat_list,
         "-c:v", "libx264", "-preset", "fast",
@@ -610,41 +628,49 @@ def _assemble_final_video(
     subprocess.run(concat_cmd, check=True, capture_output=True, text=True, timeout=600)
 
     # Step 2: Overlay audio + optional SRT subtitles
-    cmd = ["ffmpeg", "-y", "-i", str(concat_output)]
-
-    if audio_file and Path(audio_file).exists():
-        cmd += ["-i", audio_file]
-        audio_map = ["-map", "0:v:0", "-map", "1:a:0",
-                     "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
-                     "-shortest"]
-    else:
-        audio_map = ["-map", "0:v:0", "-c:v", "copy", "-an"]
-
+    subtitles_burned = False
     if srt_file and Path(srt_file).exists():
-        # Burn subtitles
-        cmd = [
-            "ffmpeg", "-y", "-i", str(concat_output),
-        ]
+        try:
+            # Escape path properly for libavfilter
+            escaped_srt = str(srt_file).replace('\\', '/').replace(':', '\\:').replace("'", "\\'")
+            sub_filter = f"subtitles='{escaped_srt}'"
+
+            cmd = [ffmpeg_bin, "-y", "-i", str(concat_output)]
+            if audio_file and Path(audio_file).exists():
+                cmd += [
+                    "-i", audio_file,
+                    "-vf", sub_filter,
+                    "-map", "0:v:0", "-map", "1:a:0",
+                    "-c:v", "libx264", "-preset", "fast", "-crf", "20", "-pix_fmt", "yuv420p",
+                    "-c:a", "aac", "-b:a", "192k",
+                    "-shortest",
+                    str(output_path),
+                ]
+            else:
+                cmd += [
+                    "-vf", sub_filter,
+                    "-c:v", "libx264", "-preset", "fast", "-crf", "20", "-pix_fmt", "yuv420p",
+                    "-an",
+                    str(output_path),
+                ]
+            subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=600)
+            subtitles_burned = True
+        except Exception as srt_err:
+            logger.warning(f"Subtitles burning failed ({srt_err}). Falling back to clean video+audio muxing...")
+
+    if not subtitles_burned:
+        cmd = [ffmpeg_bin, "-y", "-i", str(concat_output)]
         if audio_file and Path(audio_file).exists():
-            cmd += ["-i", audio_file]
             cmd += [
-                "-vf", f"subtitles={srt_file}:force_style='Fontsize=24,PrimaryColour=&H00FFFFFF&,OutlineColour=&H000000&,BorderStyle=3'",
+                "-i", audio_file,
                 "-map", "0:v:0", "-map", "1:a:0",
-                "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+                "-c:v", "libx264", "-preset", "fast", "-crf", "20", "-pix_fmt", "yuv420p",
                 "-c:a", "aac", "-b:a", "192k",
                 "-shortest",
                 str(output_path),
             ]
         else:
-            cmd += [
-                "-vf", f"subtitles={srt_file}",
-                "-c:v", "libx264", "-preset", "fast", "-crf", "20",
-                "-an",
-                str(output_path),
-            ]
-        subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=600)
-    else:
-        cmd += audio_map + [str(output_path)]
+            cmd += ["-map", "0:v:0", "-c:v", "libx264", "-preset", "fast", "-crf", "20", "-pix_fmt", "yuv420p", "-an", str(output_path)]
         subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=600)
 
     # Cleanup temp
@@ -659,6 +685,7 @@ def _assemble_final_video(
 
 
 @router.get("/{project_id}/assembly/final-video")
+@router.head("/{project_id}/assembly/final-video")
 async def serve_final_video(
     project_id: str,
     session: AsyncSession = Depends(get_db_session),
@@ -683,5 +710,6 @@ async def serve_final_video(
     return FileResponse(
         path=video_path,
         media_type="video/mp4",
+        content_disposition_type="inline",
         filename=f"final_video_{project_id[:8]}.mp4",
     )

@@ -1,3 +1,4 @@
+import os
 import shutil
 import subprocess
 from contextlib import asynccontextmanager
@@ -5,6 +6,11 @@ from typing import Dict, Any
 import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+# Ensure system tool paths (/opt/homebrew/bin, /usr/local/bin) are in PATH
+for p in ["/opt/homebrew/bin", "/usr/local/bin"]:
+    if p not in os.environ.get("PATH", ""):
+        os.environ["PATH"] = f"{p}:{os.environ.get('PATH', '')}"
 
 from app.api.v1.api import api_router
 from app.core.config import settings

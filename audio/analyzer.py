@@ -45,6 +45,40 @@ def get_audio_duration(file_path: str) -> float:
     return 60.0
 
 
+def sanitize_lyrics(raw_text: str) -> str:
+    """Removes AI reasoning, chain of thought, instruction headers, and conversational preambles."""
+    import re
+    # Remove XML style think tags
+    text = re.sub(r"<think>.*?</think>", "", str(raw_text or ""), flags=re.DOTALL)
+
+    # Check for the first real standalone stanza header on its own line
+    first_header_match = re.search(r"(?m)^\s*(\[(?:Intro|Verse|Chorus|Pre-Chorus|Bridge|Outro)[^\]]*\])\s*$", text, re.IGNORECASE)
+    if first_header_match:
+        text = text[first_header_match.start():]
+
+    lines = []
+    ignorable_prefixes = (
+        "the user wants", "let me plan", "let me draft", "wait, the", "i should",
+        "i need to", "target audience", "target duration", "creative entropy",
+        "requirements:", "output format:", "here is the", "sure, here", "in verse",
+        "final check", "1. exactly", "2. every", "3. repetitive", "4. no copyright",
+        "5. target", "6. target", "7. creative", "note:", "actually,", "this looks good",
+        "better.", "also in the", "one more check", "that's 8 stanzas",
+        "the output should be", "one final read", "let me refine", "let me check",
+        "- [", "* [", "structure:", "planning:",
+    )
+    for line in text.splitlines():
+        l_str = line.strip()
+        if not l_str or l_str.startswith("```"):
+            continue
+        lower = l_str.lower()
+        if any(lower.startswith(prefix) for prefix in ignorable_prefixes):
+            continue
+        lines.append(l_str)
+
+    return "\n".join(lines)
+
+
 def analyze_audio_timeline(audio_file: str, approved_lyrics: str, bpm: int = 120) -> Dict[str, Any]:
     """
     Analyzes generated song/audio file and creates a structured audio timeline:
@@ -60,8 +94,9 @@ def analyze_audio_timeline(audio_file: str, approved_lyrics: str, bpm: int = 120
     beat_duration = 60.0 / bpm
     total_beats = int(duration / beat_duration)
 
-    # 1. Parse approved lyrics into stanzas
-    raw_lines = approved_lyrics.splitlines()
+    # 1. Clean and parse approved lyrics into stanzas
+    clean_text = sanitize_lyrics(approved_lyrics)
+    raw_lines = clean_text.splitlines()
     sections = []
     current_section = "Verse 1"
     current_lines = []

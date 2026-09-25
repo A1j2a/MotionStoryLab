@@ -55,7 +55,10 @@ async def generate_project_content_package(
 
     topic = project.topic or project.title
     import asyncio
-    duration_mins = float(project.duration_min or 2.0)
+    d_min = float(project.duration_min or 2.0)
+    d_max = float(project.duration_max or d_min)
+    duration_mins = (d_min + d_max) / 2.0 if d_max > d_min else d_min
+
     pkg = await asyncio.to_thread(
         generate_content_package,
         topic=topic,
@@ -233,17 +236,38 @@ async def regenerate_lyrics_only(
 
     topic = project.topic or project.title
     import asyncio
-    lyrics_data = await asyncio.to_thread(generate_preschool_lyrics, topic)
+    import random
+    from ai.content_package import generate_dynamic_ai_lyrics
+    d_min = float(project.duration_min or 2.0)
+    d_max = float(project.duration_max or d_min)
+    duration_mins = (d_min + d_max) / 2.0 if d_max > d_min else d_min
+    seed = random.randint(10000, 99999)
+
+    lyrics_data = await asyncio.to_thread(
+        generate_dynamic_ai_lyrics,
+        topic=topic,
+        duration_minutes=duration_mins,
+        target_age=project.target_age or "1–4 Years",
+        entropy_seed=seed,
+    )
 
     meta = dict(project.metadata_json or {})
     curr_pkg = dict(meta.get("content_package") or {})
     curr_pkg["lyrics_full"] = lyrics_data["lyrics_full"]
-    curr_pkg["approved_lyrics"] = lyrics_data["lyrics_full"]
-    curr_pkg["verses"] = lyrics_data["verses"]
+    curr_pkg["approved_lyrics"] = lyrics_data["approved_lyrics"]
+    curr_pkg["verses"] = lyrics_data.get("verses", [])
+
+    # Re-embed lyrics into description if present
+    if "description" in curr_pkg and curr_pkg["description"]:
+        desc = curr_pkg["description"]
+        if "🎵 FULL SONG LYRICS:" in desc:
+            parts = desc.split("🎵 FULL SONG LYRICS:")
+            after_parts = parts[1].split("\n\n🌟 ABOUT THIS VIDEO:")
+            curr_pkg["description"] = f"{parts[0]}🎵 FULL SONG LYRICS:\n{lyrics_data['lyrics_full']}\n\n🌟 ABOUT THIS VIDEO:{after_parts[1] if len(after_parts) > 1 else ''}"
 
     project.lyrics_text = lyrics_data["lyrics_full"]
     meta["content_package"] = curr_pkg
-    meta["approved_lyrics"] = lyrics_data["lyrics_full"]
+    meta["approved_lyrics"] = lyrics_data["approved_lyrics"]
     project.metadata_json = meta
     await project_repo.update(project)
 

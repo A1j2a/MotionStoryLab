@@ -115,11 +115,14 @@ export interface LyricTimestamp {
 
 export interface AudioTimeline {
   audio_file?: string;
-  duration: number;
-  bpm: number;
-  total_beats: number;
-  sections: AudioSection[];
-  lyrics_timestamps: LyricTimestamp[];
+  title?: string;
+  duration?: number;
+  total_duration?: number;
+  bpm?: number;
+  total_beats?: number;
+  sections?: AudioSection[];
+  lyrics_timestamps?: LyricTimestamp[];
+  lyric_timestamps?: LyricTimestamp[];
   cues?: Array<{ time: number; type: string; action: string }>;
 }
 
@@ -234,11 +237,14 @@ export interface Scene {
   id: string;
   project_id: string;
   scene_number: number;
+  start_time?: number | null;
+  end_time?: number | null;
   duration: number;
   environment: string;
   characters?: any;
   actions?: string[];
   camera?: Record<string, any> | null;
+  camera_prompt?: string | null;
   lighting?: Record<string, any> | null;
   dialogue?: string | null;
   lyrics?: string | null;
@@ -248,6 +254,7 @@ export interface Scene {
   transition?: string | null;
   status: string;
   render_path?: string | null;
+  local_video_path?: string | null;
   error?: string | null;
   provider?: string | null;
   start_frame?: string | null;

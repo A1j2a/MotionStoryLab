@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Scene, AISettings } from "@/lib/types";
-import { api } from "@/lib/api";
+import { api, API_BASE } from "@/lib/api";
 import {
   Clapperboard,
   RotateCcw,
@@ -20,6 +20,12 @@ import {
   Video,
   Cpu,
   Zap,
+  UploadCloud,
+  Download,
+  AlertTriangle,
+  ListOrdered,
+  X,
+  ExternalLink,
 } from "lucide-react";
 
 interface StoryboardViewProps {
@@ -48,9 +54,47 @@ export function StoryboardView({
   const [copiedPromptId, setCopiedPromptId] = useState<string | null>(null);
   const [aiSettings, setAiSettings] = useState<AISettings | null>(null);
 
+  // Manual workflow state inside Storyboard
+  const [copyStatus, setCopyStatus] = useState<{ total_scenes: number; copied_count: number; uploaded_count: number } | null>(null);
+  const [uploadingVideos, setUploadingVideos] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const [unresolved, setUnresolved] = useState<Array<{ filename: string; tmp_path: string; duration?: number }>>([]);
+  const [fileSceneMap, setFileSceneMap] = useState<Record<string, number>>({});
+  const [autoAssigning, setAutoAssigning] = useState(false);
+  const [sequenceConfirmed, setSequenceConfirmed] = useState(false);
+  const [confirmingSequence, setConfirmingSequence] = useState(false);
+  const [assembling, setAssembling] = useState(false);
+  const [finalVideoResult, setFinalVideoResult] = useState<{ status: string; final_video: string; duration: number } | null>(null);
+  const [assembleError, setAssembleError] = useState<string | null>(null);
+
+  const handleAutoAssignAll = async () => {
+    if (!unresolved.length || !projectId) return;
+    setAutoAssigning(true);
+    try {
+      const remainingScenes = scenes.filter((s) => !s.uploaded_file).map((s) => s.scene_number);
+      for (let i = 0; i < unresolved.length; i++) {
+        const u = unresolved[i];
+        const targetSceneNum = fileSceneMap[u.tmp_path] || (remainingScenes[i] ?? (i + 1));
+        await api.assignUnresolvedVideo(projectId, targetSceneNum, u.tmp_path);
+      }
+      setUnresolved([]);
+      const updated = await api.getScenes(projectId);
+      if (onScenesUpdated) onScenesUpdated(updated);
+      const st = await api.getCopyStatus(projectId);
+      setCopyStatus(st);
+    } catch (err: any) {
+      alert("Auto-assign failed: " + (err?.message || err));
+    } finally {
+      setAutoAssigning(false);
+    }
+  };
+
   useEffect(() => {
     api.getAISettings().then(setAiSettings).catch(() => {});
-  }, []);
+    if (projectId) {
+      api.getCopyStatus(projectId).then(setCopyStatus).catch(() => {});
+    }
+  }, [projectId]);
 
   const handleRegenerateStoryboard = async (dur: number) => {
     setSceneDuration(dur);
@@ -106,11 +150,21 @@ export function StoryboardView({
     return `3D Pixar Disney style CGI animation: ${characters}, cute expressive face, big sparkling eyes, colorful preschool outfit. Visual View & Action: Character is ${actions} in lively synchronization with '${lyrics}'. Environment: ${env} filled with playful animated props, toy flowers, and pastel clouds. Cinematography: ${camera}, warm soft golden sunlight, gentle rim light, raytraced subsurface scattering, vibrant saturated colors, 8k ultra-detailed nursery rhyme render.`;
   };
 
-  const handleCopyVideoPrompt = (sc: Scene) => {
+  const handleCopyVideoPrompt = async (sc: Scene) => {
     const prompt = getVideoPrompt(sc);
     navigator.clipboard.writeText(prompt);
     setCopiedPromptId(sc.id);
     setTimeout(() => setCopiedPromptId(null), 2000);
+    try {
+      await api.markSceneCopied(projectId, sc.id);
+      if (onScenesUpdated) {
+        onScenesUpdated(scenes.map(s => s.id === sc.id ? { ...s, prompt_status: 'PROMPT_COPIED' } : s));
+      }
+      const st = await api.getCopyStatus(projectId);
+      setCopyStatus(st);
+    } catch (e) {
+      console.error("Mark scene copied failed:", e);
+    }
   };
 
   const handleCopyAllVideoPrompts = () => {
@@ -491,6 +545,247 @@ ${prompt}`;
             </div>
           );
         })}
+      </div>
+
+      {/* ───────────────────────────────────────────────────────────── */}
+      {/* MANUAL WORKFLOW: VIDEO UPLOAD, SEQUENCE & ASSEMBLY          */}
+      {/* ───────────────────────────────────────────────────────────── */}
+      <div className="pt-6 border-t border-[#E5E5EA] space-y-6">
+        <div className="space-y-1">
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-indigo-50 text-indigo-800 border border-indigo-200">
+            <UploadCloud className="w-3.5 h-3.5 text-indigo-600" />
+            <span>Step 6 to 8 • Upload External AI Videos & Assemble</span>
+          </div>
+          <h3 className="text-base font-bold text-[#1D1D1F]">
+            Upload Generated Scene Videos & Assemble Final Video
+          </h3>
+          <p className="text-xs text-[#6E6E73]">
+            Generated scenes in Google Flow / Kling / Runway? Upload your MP4/MOV clips here for automatic FFmpeg assembly.
+          </p>
+        </div>
+
+        {/* Drag & Drop Box */}
+        <div
+          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={async (e) => {
+            e.preventDefault();
+            setDragOver(false);
+            if (!e.dataTransfer.files || !projectId) return;
+            setUploadingVideos(true);
+            try {
+              const res = await api.batchUploadScenes(projectId, Array.from(e.dataTransfer.files));
+              setUnresolved(res.unresolved || []);
+              const updated = await api.getScenes(projectId);
+              if (onScenesUpdated) onScenesUpdated(updated);
+              const st = await api.getCopyStatus(projectId);
+              setCopyStatus(st);
+            } catch (err: any) {
+              alert("Upload failed: " + (err?.message || err));
+            } finally {
+              setUploadingVideos(false);
+            }
+          }}
+          className={`border-2 border-dashed rounded-3xl p-6 text-center transition-all ${
+            dragOver ? "border-[#FF6B00] bg-orange-50/50" : "border-[#E5E5EA] bg-[#FAFAFC] hover:border-[#FF6B00]/60"
+          }`}
+        >
+          <input
+            type="file"
+            id="storyboard-video-upload"
+            multiple
+            accept="video/mp4,video/quicktime,video/webm"
+            className="hidden"
+            onChange={async (e) => {
+              if (!e.target.files || !projectId) return;
+              setUploadingVideos(true);
+              try {
+                const res = await api.batchUploadScenes(projectId, Array.from(e.target.files));
+                setUnresolved(res.unresolved || []);
+                const updated = await api.getScenes(projectId);
+                if (onScenesUpdated) onScenesUpdated(updated);
+                const st = await api.getCopyStatus(projectId);
+                setCopyStatus(st);
+              } catch (err: any) {
+                alert("Upload failed: " + (err?.message || err));
+              } finally {
+                setUploadingVideos(false);
+              }
+            }}
+          />
+          <div className="space-y-2">
+            <UploadCloud className="w-8 h-8 text-indigo-600 mx-auto" />
+            <p className="text-xs font-bold text-[#1D1D1F]">
+              {uploadingVideos ? "Uploading & validating video durations…" : "Drag & drop scene video files here (or click to browse)"}
+            </p>
+            <p className="text-[11px] text-[#86868B]">
+              Files named <code>scene_01.mp4</code> or <code>01.mp4</code> automatically map to the matching scene.
+            </p>
+            <label
+              htmlFor="storyboard-video-upload"
+              className="inline-block px-4 py-2 bg-[#FF6B00] hover:bg-[#EA580C] text-white rounded-xl text-xs font-bold transition-all cursor-pointer"
+            >
+              Browse Files
+            </label>
+          </div>
+        </div>
+
+        {/* Unresolved files manual assignment */}
+        {unresolved.length > 0 && (
+          <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <p className="text-xs font-bold text-amber-900 flex items-center gap-1.5">
+                <AlertTriangle className="w-4 h-4 text-amber-600" />
+                <span>Unresolved Filenames ({unresolved.length} clips) — Auto or Manual Assign:</span>
+              </p>
+              <button
+                type="button"
+                onClick={handleAutoAssignAll}
+                disabled={autoAssigning}
+                className="inline-flex items-center gap-1 px-3 py-1.5 bg-gradient-to-r from-orange-500 to-amber-600 hover:opacity-90 text-white rounded-xl text-xs font-bold shadow-xs cursor-pointer disabled:opacity-50"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>{autoAssigning ? "Assigning..." : "⚡ Auto-Assign All in Order (1 → N)"}</span>
+              </button>
+            </div>
+            <div className="space-y-2">
+              {unresolved.map((u, i) => {
+                const selectedTarget = fileSceneMap[u.tmp_path] ?? (i + 1);
+                return (
+                  <div key={u.tmp_path || i} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-white border border-amber-200 rounded-xl p-2.5 text-xs">
+                    <span className="font-mono text-[#1D1D1F] truncate max-w-xs">{u.filename}</span>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="text-[#86868B]">Assign to:</span>
+                      <select
+                        value={selectedTarget}
+                        onChange={(e) => {
+                          const val = Number(e.target.value);
+                          setFileSceneMap((prev) => ({ ...prev, [u.tmp_path]: val }));
+                        }}
+                        className="border border-[#E5E5EA] rounded-lg px-2.5 py-1 font-bold text-xs bg-white focus:border-orange-500 focus:outline-none"
+                      >
+                        {scenes.map((s) => (
+                          <option key={s.scene_number} value={s.scene_number}>
+                            Scene {String(s.scene_number).padStart(2, "0")} {s.uploaded_file ? "(Has Video)" : ""}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            await api.assignUnresolvedVideo(projectId, selectedTarget, u.tmp_path);
+                            setUnresolved((prev) => prev.filter((x) => x.tmp_path !== u.tmp_path));
+                            const updated = await api.getScenes(projectId);
+                            if (onScenesUpdated) onScenesUpdated(updated);
+                            const st = await api.getCopyStatus(projectId);
+                            setCopyStatus(st);
+                          } catch (err: any) {
+                            alert("Assignment failed: " + err.message);
+                          }
+                        }}
+                        className="px-3.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-bold text-xs transition-colors cursor-pointer"
+                      >
+                        Assign
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Sequence and Assembly Controls */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-[#FAFAFC] border border-[#E5E5EA] rounded-2xl">
+          <div className="flex items-center gap-2 text-xs">
+            <ListOrdered className="w-4 h-4 text-cyan-600" />
+            <span className="font-bold text-[#1D1D1F]">Sequence Order:</span>
+            <span className="font-mono text-[#6E6E73]">
+              {scenes.map(s => String(s.scene_number).padStart(2, "0")).join(" → ")}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={async () => {
+                setConfirmingSequence(true);
+                try {
+                  const order = scenes.map(s => s.scene_number).sort((a, b) => a - b);
+                  await api.confirmSceneSequence(projectId, order);
+                  setSequenceConfirmed(true);
+                } catch (err: any) {
+                  alert("Failed to confirm: " + err.message);
+                } finally {
+                  setConfirmingSequence(false);
+                }
+              }}
+              disabled={confirmingSequence || scenes.length === 0}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                sequenceConfirmed ? "bg-emerald-600 text-white" : "bg-cyan-600 hover:bg-cyan-700 text-white"
+              }`}
+            >
+              {sequenceConfirmed ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Check className="w-3.5 h-3.5" />}
+              <span>{sequenceConfirmed ? "Sequence Confirmed ✓" : "Confirm Sequence"}</span>
+            </button>
+
+            <button
+              onClick={async () => {
+                setAssembling(true);
+                setAssembleError(null);
+                try {
+                  const res = await api.generateFinalVideoFromUploads(projectId);
+                  setFinalVideoResult(res);
+                  if (onSceneRerendered) onSceneRerendered();
+                } catch (err: any) {
+                  setAssembleError(err?.message || "Assembly failed");
+                } finally {
+                  setAssembling(false);
+                }
+              }}
+              disabled={assembling || scenes.length === 0}
+              className="px-5 py-2 bg-gradient-to-r from-emerald-600 to-green-600 hover:opacity-95 text-white rounded-xl text-xs font-extrabold transition-all shadow-md shadow-emerald-500/20 flex items-center gap-2"
+            >
+              {assembling ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Film className="w-3.5 h-3.5" />}
+              <span>{assembling ? "Assembling FFmpeg Video…" : "Assemble Final Video"}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Assemble error */}
+        {assembleError && (
+          <div className="p-3.5 bg-red-50 border border-red-200 rounded-xl text-xs text-red-800">
+            <strong>Error:</strong> {assembleError}
+          </div>
+        )}
+
+        {/* Final Video player result */}
+        {finalVideoResult && (
+          <div className="bg-emerald-50/50 border border-emerald-300 rounded-3xl p-5 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-emerald-900 flex items-center gap-1.5">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                Final Video Assembled Successfully ({finalVideoResult.duration?.toFixed(1)}s)
+              </span>
+              <a
+                href={`${API_BASE}/api/v1/projects/${projectId}/assembly/final-video`}
+                download="final_kids_song.mp4"
+                className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Download MP4</span>
+              </a>
+            </div>
+            <div className="aspect-video bg-black rounded-2xl overflow-hidden max-w-2xl mx-auto shadow-lg">
+              <video
+                src={`${API_BASE}/api/v1/projects/${projectId}/assembly/final-video?t=${Date.now()}`}
+                controls
+                playsInline
+                className="w-full h-full"
+              />
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

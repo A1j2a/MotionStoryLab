@@ -142,37 +142,31 @@ def discover_kids_topics(
     elif "bilingual" in lang_str.lower():
         lang_note = "LANGUAGE REQUIREMENT: Generate bilingual English + Hindi / Spanish preschool rhyme themes designed for early multilingual learning."
 
-    def _query_ai_for_topics(batch_size: int, extra_instruction: str = "") -> List[Dict[str, Any]]:
-        prompt = f"""Generate {batch_size} brand new, unique, high-performing YouTube Kids 3D animated nursery rhyme and preschool educational song topic opportunity cards with 10M+ view potential, high CTR titles, strong hooks, and SEO keywords.
-Creative Variation Seed: {seed_str} (Entropy: {random.randint(1000, 9999)})
-Target Audience: {age_str}
-Song Duration: {dur_str}
-Target Language / Audience: {lang_str}
+    def _query_ai_for_topics(batch_size: int) -> List[Dict[str, Any]]:
+        prompt = f"""Generate {batch_size} original, copyright-free YouTube Kids 3D nursery rhyme & preschool song topic opportunity cards.
+Audience: {age_str} | Duration: {dur_str} | Language: {lang_str} | Seed: {seed_str}
 {lang_note}
-{extra_instruction}
 
-STRICT COPYRIGHT & ORIGINALITY POLICY:
-1. Every single topic, character, title, and story concept MUST be 100% original, copyright-free, and brand new.
-2. NEVER use or reference any copyrighted characters, franchises, or brands (NO Cocomelon, Disney, Pixar, Marvel, Peppa Pig, Baby Shark, Pinkfong, Paw Patrol, Super Simple Songs, ChuChu TV, etc.).
-3. Characters must be cute, original preschool characters (e.g. original animal buddies, friendly vehicles, celestial figures, or children).
-4. Concepts must be fresh educational, musical, or good-habit learning songs with massive viral potential.
+NO COPYRIGHTED CHARACTERS (No Cocomelon, Peppa Pig, Disney, Pinkfong, Baby Shark). Must be 100% original preschool characters.
 
-Return ONLY a valid JSON object with a "topics" array containing exactly {batch_size} original, copyright-free topic objects.
-Each topic object MUST contain:
-- "topic": Short punchy theme name
-- "suggested_title": High-CTR engaging YouTube title with friendly emojis (must have million-view potential)
-- "category": Choose from ("Vehicles & Animals", "Numbers & Counting", "Good Habits", "Bedtime Lullabies", "Colors & Shapes", "Social-Emotional", "Adventure & Science")
-- "target_age": "{age_str}"
-- "search_keywords": list of 5 high-intent preschool search keywords
-- "content_angle": 1 sentence explaining the musical & visual engagement hook
-- "why_worth_considering": 1 sentence audience & parental appeal rationale
-- "opportunity_signals": 1 sentence search trend & repetition value indicator
-- "suggested_characters": list of 3-4 cute character names
-- "suggested_story_concept": 1-2 sentence animated storyboard concept
-"""
-        system_prompt = "You are a world-class preschool content strategist and original children songwriter. All generated concepts, characters, and titles MUST be 100% original, copyright-free, and brand new. Output strictly valid JSON with no conversational text."
+Return strictly a JSON object:
+{{"topics": [
+  {{
+    "topic": "Short punchy name",
+    "suggested_title": "High-CTR engaging YouTube title with friendly emojis",
+    "category": "Vehicles & Animals | Numbers & Counting | Good Habits | Bedtime Lullabies | Colors & Shapes | Social-Emotional",
+    "target_age": "{age_str}",
+    "search_keywords": ["keyword1", "keyword2", "keyword3"],
+    "content_angle": "1-sentence musical & visual engagement hook",
+    "why_worth_considering": "1-sentence audience appeal rationale",
+    "opportunity_signals": "1-sentence search trend indicator",
+    "suggested_characters": ["Name1", "Name2", "Name3"],
+    "suggested_story_concept": "1-sentence animated storyline"
+  }}
+]}}"""
+        system_prompt = "You are a world-class preschool content strategist. All generated concepts, characters, and titles MUST be 100% original and copyright-free. Output strictly valid JSON."
 
-        res = provider.generate_json(prompt, system_prompt, max_tokens=2200)
+        res = provider.generate_json(prompt, system_prompt, max_tokens=1000)
         if res and "topics" in res and isinstance(res["topics"], list):
             return [t for t in res["topics"] if isinstance(t, dict) and t.get("suggested_title")]
         return []
@@ -193,23 +187,7 @@ Each topic object MUST contain:
     except Exception as e:
         logger.warning(f"Live AI Topic Generation call failed via {model_name}: {e}")
 
-    # 2. If AI returned fewer topics than limit, attempt one augmentation call if AI is alive
-    if 0 < len(collected) < limit:
-        needed = limit - len(collected)
-        try:
-            more_topics = _query_ai_for_topics(
-                needed,
-                extra_instruction=f"CRITICAL: Do NOT duplicate these already generated titles: {list(seen_titles)}",
-            )
-            for t in more_topics:
-                title_key = t.get("suggested_title", "").strip().lower()
-                if title_key and title_key not in seen_titles:
-                    seen_titles.add(title_key)
-                    collected.append(t)
-        except Exception as e:
-            logger.warning(f"AI augmentation call returned error: {e}")
-
-    # 3. If AI returned fewer than limit (e.g. offline, mock test, or API rate limit), dynamically synthesize remaining topics
+    # 2. Instant dynamic synthesis backfill if needed (no slow second LLM network round-trip)
     if len(collected) < limit:
         rng = random.Random(seed_val)
         for i in range(limit - len(collected)):

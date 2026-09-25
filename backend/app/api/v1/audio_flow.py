@@ -143,6 +143,9 @@ async def get_project_audio_timeline(
 
 
 @router.get("/{project_id}/song")
+@router.head("/{project_id}/song")
+@router.get("/{project_id}/audio-flow/stream")
+@router.head("/{project_id}/audio-flow/stream")
 async def get_project_song_file(
     project_id: str,
     session: AsyncSession = Depends(get_db_session),
@@ -159,7 +162,7 @@ async def get_project_song_file(
     if not os.path.exists(song_path):
         raise HTTPException(status_code=404, detail="Song file not yet generated")
 
-    return FileResponse(song_path, media_type="audio/wav", filename=f"{project.title}_song.wav")
+    return FileResponse(song_path, media_type="audio/wav", content_disposition_type="inline", filename=f"{project.title}_song.wav")
 
 from fastapi import UploadFile, File
 import shutil

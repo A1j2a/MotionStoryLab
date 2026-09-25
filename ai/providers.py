@@ -91,7 +91,7 @@ class OpenRouterProvider(BaseAIProvider):
                 headers=headers,
                 method="POST",
             )
-            with urllib.request.urlopen(req, timeout=60) as response:
+            with urllib.request.urlopen(req, timeout=8) as response:
                 if response.status == 200:
                     data = json.loads(response.read().decode("utf-8"))
                     choices = data.get("choices", [])
@@ -110,6 +110,10 @@ class OpenRouterProvider(BaseAIProvider):
             self.last_error = f"HTTP {e.code}: {err_text}"
             logger.warning(f"OpenRouter API call failed to {target_url} (Model: {self.model}): {self.last_error}")
 
+            # If authentication failed (HTTP 401 or 403), fail immediately without wasting time on retries
+            if e.code in (401, 403):
+                return None
+
             # If user selected a paid model and hits credit limit (HTTP 402) or unavailable free slug (HTTP 404), fallback to active free models
             if e.code == 402 or (e.code == 404 and ":free" in self.model):
                 logger.warning(f"Model '{self.model}' unavailable or credit limit reached (HTTP {e.code}). Attempting automatic fallback to free models...")
@@ -122,14 +126,14 @@ class OpenRouterProvider(BaseAIProvider):
                     try:
                         logger.info(f"Retrying OpenRouter request with free model: {fb_model}...")
                         payload["model"] = fb_model
-                        payload["max_tokens"] = min(token_limit, 1200)
+                        payload["max_tokens"] = min(token_limit, 800)
                         req = urllib.request.Request(
                             target_url,
                             data=json.dumps(payload).encode("utf-8"),
                             headers=headers,
                             method="POST",
                         )
-                        with urllib.request.urlopen(req, timeout=60) as fb_response:
+                        with urllib.request.urlopen(req, timeout=6) as fb_response:
                             if fb_response.status == 200:
                                 fb_data = json.loads(fb_response.read().decode("utf-8"))
                                 fb_choices = fb_data.get("choices", [])
@@ -267,7 +271,7 @@ class OllamaProvider(BaseAIProvider):
                 {"role": "user", "content": prompt},
             ],
             "stream": False,
-            "options": {"temperature": temperature},
+            "options": {"temperature": temperature, "num_predict": 1000},
         }
 
         try:
@@ -277,7 +281,7 @@ class OllamaProvider(BaseAIProvider):
                 headers=headers,
                 method="POST",
             )
-            with urllib.request.urlopen(req, timeout=60) as response:
+            with urllib.request.urlopen(req, timeout=35) as response:
                 if response.status == 200:
                     data = json.loads(response.read().decode("utf-8"))
                     msg = data.get("message", {})
@@ -297,7 +301,7 @@ class OllamaProvider(BaseAIProvider):
                     {"role": "user", "content": prompt},
                 ],
                 "temperature": temperature,
-                "max_tokens": 2500,
+                "max_tokens": 1500,
             }
             req = urllib.request.Request(
                 v1_url,
@@ -305,7 +309,7 @@ class OllamaProvider(BaseAIProvider):
                 headers=headers,
                 method="POST",
             )
-            with urllib.request.urlopen(req, timeout=60) as response:
+            with urllib.request.urlopen(req, timeout=35) as response:
                 if response.status == 200:
                     data = json.loads(response.read().decode("utf-8"))
                     return data["choices"][0]["message"]["content"]
@@ -406,7 +410,8 @@ def get_ai_provider() -> BaseAIProvider:
     openrouter_model = db_model or os.environ.get("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct").strip()
     preferred = os.environ.get("AI_PROVIDER", "").strip().lower()
 
-    if (openrouter_enabled or preferred == "openrouter") and openrouter_key:
+    is_test_key = openrouter_key.startswith("sk-or-v1-test") or "testkey" in openrouter_key
+    if (openrouter_enabled or preferred == "openrouter") and openrouter_key and not is_test_key:
         return OpenRouterProvider(api_key=openrouter_key, model=openrouter_model)
 
     if preferred == "omniroute":

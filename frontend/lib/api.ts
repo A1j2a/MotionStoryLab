@@ -17,9 +17,9 @@ import {
   SunoPromptPackage,
 } from "./types";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+export const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
-async function request<T>(path: string, options: RequestInit = {}, timeoutMs = 30000): Promise<T> {
+async function request<T>(path: string, options: RequestInit = {}, timeoutMs = 120000): Promise<T> {
   const url = `${API_BASE}${path}`;
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -181,6 +181,14 @@ export const api = {
     request<{ status: string; message: string }>(`/api/v1/projects/${projectId}/song/generate`, {
       method: "POST",
     }, 90000),
+  generateNeuralAudio: (projectId: string) =>
+    request<{ status: string; message: string; audio_file?: string; total_duration?: number }>(
+      `/api/v1/projects/${projectId}/song/generate`,
+      { method: "POST" },
+      90000
+    ),
+  uploadAudioFile: (projectId: string, file: File, lyrics?: string) =>
+    api.uploadSongAudio(projectId, file, lyrics),
   getAudioTimeline: (projectId: string) =>
     request<AudioTimeline>(`/api/v1/projects/${projectId}/audio-timeline`),
   getSongAudioUrl: (projectId: string) =>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { api } from "@/lib/api";
+import { api, API_BASE } from "@/lib/api";
 import { Project, Scene, AudioTimeline } from "@/lib/types";
 import {
   Sparkles,
@@ -171,9 +171,10 @@ export function ManualWorkflowView({ initialProjectId, onProjectChange }: Manual
       if (seoData) setSeoPkg(seoData);
       if (timeline) setAudioTimeline(timeline);
       if (scenesList) {
-        setScenes(scenesList as SceneWithStatus[]);
-        setSequenceOrder(scenesList.map((s: Scene) => s.scene_number).sort((a: number, b: number) => a - b));
-        const allConfirmed = scenesList.length > 0 && scenesList.every((s: SceneWithStatus) => s.prompt_status === "ORDER_CONFIRMED");
+        const typedScenes = scenesList as SceneWithStatus[];
+        setScenes(typedScenes);
+        setSequenceOrder(typedScenes.map((s) => s.scene_number).sort((a, b) => a - b));
+        const allConfirmed = typedScenes.length > 0 && typedScenes.every((s) => s.prompt_status === "ORDER_CONFIRMED");
         setSequenceConfirmed(allConfirmed);
       }
       if (statusData) setCopyStatus(statusData);
@@ -420,7 +421,7 @@ export function ManualWorkflowView({ initialProjectId, onProjectChange }: Manual
   const uploadedCount = scenes.filter((s) => s.uploaded_file).length;
   const allCopied = totalScenes > 0 && copiedCount >= totalScenes;
   const allUploaded = totalScenes > 0 && uploadedCount >= totalScenes;
-  const songDuration = audioTimeline?.total_duration || 0;
+  const songDuration = audioTimeline?.total_duration || audioTimeline?.duration || 0;
   const plannedScenesCount = songDuration > 0 ? Math.ceil(songDuration / targetDuration) : 0;
 
   return (
@@ -755,8 +756,12 @@ export function ManualWorkflowView({ initialProjectId, onProjectChange }: Manual
                   </p>
                   <p className="text-[11px] text-[#86868B] flex items-center gap-1">
                     <Clock className="w-3 h-3 text-amber-600" />
-                    <span>Total Duration: <strong>{audioTimeline.total_duration?.toFixed(1)}s</strong></span>
-                    <span>• {audioTimeline.lyric_timestamps?.length || 0} Lyric Lines</span>
+                    <span>
+                      Total Duration: <strong>{(audioTimeline.total_duration || audioTimeline.duration || 0).toFixed(1)}s</strong>
+                    </span>
+                    <span>
+                      • {(audioTimeline.lyric_timestamps || audioTimeline.lyrics_timestamps || []).length} Lyric Lines
+                    </span>
                   </p>
                 </div>
               </div>
@@ -788,22 +793,22 @@ export function ManualWorkflowView({ initialProjectId, onProjectChange }: Manual
             {/* Hidden audio element */}
             <audio
               ref={audioPlayerRef}
-              src={`/api/v1/projects/${selectedProjectId}/audio-flow/stream?t=${Date.now()}`}
+              src={`${API_BASE}/api/v1/projects/${selectedProjectId}/song?t=${Date.now()}`}
               onEnded={() => setIsPlayingAudio(false)}
             />
 
             {/* Lyric Snippets Preview */}
-            {audioTimeline.lyric_timestamps && audioTimeline.lyric_timestamps.length > 0 && (
+            {((audioTimeline.lyric_timestamps || audioTimeline.lyrics_timestamps || []).length > 0) && (
               <div className="bg-white border border-[#E5E5EA] rounded-xl p-3 max-h-32 overflow-y-auto space-y-1">
                 <p className="text-[10px] font-bold uppercase tracking-wider text-[#86868B] pb-1">
                   Synchronized SRT Lyrics:
                 </p>
-                {audioTimeline.lyric_timestamps.slice(0, 8).map((l, i) => (
+                {(audioTimeline.lyric_timestamps || audioTimeline.lyrics_timestamps || []).slice(0, 8).map((l: any, i: number) => (
                   <div key={i} className="text-xs text-[#1D1D1F] flex items-center justify-between">
                     <span className="font-mono text-[10px] text-[#86868B]">
-                      {l.start?.toFixed(1)}s – {l.end?.toFixed(1)}s
+                      {(l.start || 0).toFixed(1)}s – {(l.end || 0).toFixed(1)}s
                     </span>
-                    <span className="font-medium truncate max-w-md">{l.line}</span>
+                    <span className="font-medium truncate max-w-md">{l.line || l.text}</span>
                   </div>
                 ))}
               </div>
@@ -1285,7 +1290,7 @@ export function ManualWorkflowView({ initialProjectId, onProjectChange }: Manual
                 <span>Final Video Assembled Successfully! ({finalVideoResult.duration?.toFixed(1)}s)</span>
               </div>
               <a
-                href={`/api/v1/projects/${selectedProjectId}/assembly/final-video`}
+                href={`${API_BASE}/api/v1/projects/${selectedProjectId}/assembly/final-video`}
                 download={`${activeProject?.title || "kids_song"}.mp4`}
                 className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-emerald-500/20"
               >
@@ -1296,8 +1301,9 @@ export function ManualWorkflowView({ initialProjectId, onProjectChange }: Manual
 
             <div className="rounded-2xl overflow-hidden bg-black aspect-video max-w-3xl mx-auto shadow-xl">
               <video
-                src={`/api/v1/projects/${selectedProjectId}/assembly/final-video?t=${Date.now()}`}
+                src={`${API_BASE}/api/v1/projects/${selectedProjectId}/assembly/final-video?t=${Date.now()}`}
                 controls
+                playsInline
                 className="w-full h-full"
               />
             </div>

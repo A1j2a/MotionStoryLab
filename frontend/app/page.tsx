@@ -7,6 +7,7 @@ import { TopicDiscovery } from "@/components/TopicDiscovery";
 import { ContentPackageEditor } from "@/components/ContentPackageEditor";
 import { StoryboardView } from "@/components/StoryboardView";
 import { QCCheckView } from "@/components/QCCheckView";
+import { ManualWorkflowView } from "@/components/ManualWorkflowView";
 import { api } from "@/lib/api";
 import {
   Project,
@@ -60,6 +61,7 @@ export default function DashboardPage() {
 
   // Workflow Master Switch (ON / OFF)
   const [workflowActive, setWorkflowActive] = useState<boolean>(true);
+  const [workflowMode, setWorkflowMode] = useState<"manual" | "legacy">("manual");
 
   // Active workflow state
   const [activeProject, setActiveProject] = useState<Project | null>(null);
@@ -693,10 +695,10 @@ export default function DashboardPage() {
                     </button>
                     <div>
                       <span className="font-bold text-xs text-[#1D1D1F] block">
-                        Master Nursery Song ({audioTimeline.duration.toFixed(1)}s)
+                        Master Nursery Song ({((audioTimeline.duration || audioTimeline.total_duration || 0)).toFixed(1)}s)
                       </span>
                       <span className="text-[11px] text-[#6E6E73]">
-                        BPM: {audioTimeline.bpm} • {audioTimeline.sections?.length || 0} Sections • Synchronized to Lyrics
+                        BPM: {audioTimeline.bpm || 120} • {audioTimeline.sections?.length || 0} Sections • Synchronized to Lyrics
                       </span>
                     </div>
                   </div>
@@ -731,7 +733,8 @@ export default function DashboardPage() {
                   </span>
                   <div className="w-full h-8 bg-white border border-[#E5E5EA] rounded-xl overflow-hidden flex">
                     {(audioTimeline.sections || []).map((sec, idx) => {
-                      const widthPct = ((sec.end - sec.start) / audioTimeline.duration) * 100;
+                      const totalDur = audioTimeline.duration || audioTimeline.total_duration || 1;
+                      const widthPct = ((sec.end - sec.start) / totalDur) * 100;
                       const colors = ["bg-orange-100 text-orange-800", "bg-blue-100 text-blue-800", "bg-emerald-100 text-emerald-800", "bg-purple-100 text-purple-800"];
                       return (
                         <div

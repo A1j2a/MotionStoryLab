@@ -6,9 +6,9 @@
 # 1. Environment & Configuration
 # Tracked for multi-machine deployment as requested
 # ------------------------------------------------------------------------------
-!.env
-!.env.example
+.env
 .env*.local
+!.env.example
 *.pem
 
 # ------------------------------------------------------------------------------
