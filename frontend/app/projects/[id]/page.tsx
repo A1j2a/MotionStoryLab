@@ -325,7 +325,9 @@ export default function ProjectDetailsPage() {
 
                     <div>
                       <h4 className="text-sm font-bold text-[#1D1D1F]">
-                        {scene.environment}
+                        {typeof scene.environment === "object" && scene.environment !== null
+                          ? (scene.environment as any).name || (scene.environment as any).id || "Preschool Meadow"
+                          : String(scene.environment || "Preschool Meadow")}
                       </h4>
                       {scene.lyrics && (
                         <p className="text-xs text-[#6E6E73] italic mt-1 bg-[#FAFAFC] border border-[#E5E5EA] p-2.5 rounded-xl">
@@ -337,7 +339,7 @@ export default function ProjectDetailsPage() {
                     <div className="text-[11px] text-[#6E6E73] space-y-1">
                       <div>
                         <span className="font-semibold text-[#1D1D1F]">Characters:</span>{" "}
-                        {scene.characters?.join(", ") || "None"}
+                        {scene.characters?.map((c: any) => typeof c === 'object' && c !== null ? c.name || c.character_id || 'Hero' : String(c)).join(", ") || "None"}
                       </div>
                       <div>
                         <span className="font-semibold text-[#1D1D1F]">Action:</span>{" "}

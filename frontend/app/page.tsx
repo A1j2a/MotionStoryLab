@@ -70,6 +70,7 @@ export default function DashboardPage() {
   const [copiedSuno, setCopiedSuno] = useState<string | null>(null);
   const [scenes, setScenes] = useState<Scene[]>([]);
   const [qcResult, setQcResult] = useState<QCResult | null>(null);
+  const [targetSceneDuration, setTargetSceneDuration] = useState<number>(8);
 
   // Workflow progress actions
   const [songLoading, setSongLoading] = useState(false);
@@ -301,7 +302,7 @@ export default function DashboardPage() {
             setSongLoading(false);
 
             // Auto generate storyboard scenes
-            const sbScenes = await api.generateStoryboard(activeProject.id);
+            const sbScenes = await api.generateStoryboard(activeProject.id, targetSceneDuration);
             setScenes(sbScenes);
           }
         } catch {
@@ -487,7 +488,7 @@ export default function DashboardPage() {
             <div className="text-2xl font-extrabold text-[#1D1D1F]">
               {stats?.completed_scenes || scenes.filter((s) => s.status === "COMPLETED").length}
             </div>
-            <p className="text-[11px] text-emerald-600 font-semibold">100% locally on Blender 5.2</p>
+            <p className="text-[11px] text-emerald-600 font-semibold">100% locally on Storybook 3D Engine (FFmpeg)</p>
           </div>
 
           <div className="bg-white border border-[#E5E5EA] rounded-2xl p-5 shadow-xs space-y-2">
@@ -536,6 +537,26 @@ export default function DashboardPage() {
               </div>
 
               <div className="flex flex-wrap items-center gap-2.5">
+                {/* Per-Scene Target Duration Selector */}
+                <div className="flex items-center gap-1.5 bg-[#FAFAFC] border border-[#E5E5EA] px-3 py-1.5 rounded-xl">
+                  <span className="text-[11px] font-bold text-[#1D1D1F] flex items-center gap-1">
+                    <Clock className="w-3.5 h-3.5 text-blue-600" />
+                    <span>Per-Scene Duration:</span>
+                  </span>
+                  <select
+                    value={targetSceneDuration}
+                    onChange={(e) => setTargetSceneDuration(Number(e.target.value))}
+                    className="bg-transparent text-xs font-bold text-blue-700 focus:outline-none cursor-pointer"
+                  >
+                    <option value={6}>6s / scene</option>
+                    <option value={7}>7s / scene</option>
+                    <option value={8}>8s / scene (Standard)</option>
+                    <option value={9}>9s / scene</option>
+                    <option value={10}>10s / scene</option>
+                    <option value={12}>12s / scene</option>
+                  </select>
+                </div>
+
                 <button
                   onClick={handleLoadSunoPrompt}
                   className="inline-flex items-center gap-1.5 bg-[#FFF7ED] text-[#EA580C] border border-[#FED7AA] hover:bg-[#FFEDD5] text-xs font-bold px-3.5 py-2 rounded-xl transition-all cursor-pointer"
@@ -747,7 +768,7 @@ export default function DashboardPage() {
                       Rendering 3D Shots in Progress ({scenes.filter((s) => s.status === "COMPLETED").length} of {scenes.length} Scenes Finished)...
                     </span>
                     <span className="text-[11px] text-blue-700">
-                      Blender GPU engine is generating camera paths, lighting & individual scene MP4 files.
+                      Storybook 3D Engine is generating camera paths, visual choreography & individual scene MP4 files.
                     </span>
                   </div>
                 </div>
@@ -771,6 +792,8 @@ export default function DashboardPage() {
             <StoryboardView
               projectId={activeProject.id}
               scenes={scenes}
+              initialSceneDuration={targetSceneDuration}
+              onScenesUpdated={(updatedScenes) => setScenes(updatedScenes)}
               onSceneRerendered={async () => {
                 const p = await api.getProject(activeProject.id);
                 if (p) {

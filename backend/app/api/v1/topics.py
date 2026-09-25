@@ -40,6 +40,7 @@ async def get_discovered_topics(
     target_age: Optional[str] = Query(None, description="Preschool age group filter"),
     duration: Optional[str] = Query(None, description="Duration filter"),
     language: Optional[str] = Query(None, description="Language / market filter"),
+    seed: Optional[int] = Query(None, description="Random seed for fresh dynamic variations"),
 ):
     """
     Step 1: '🔥 Find Today's Kids Topics'
@@ -53,6 +54,7 @@ async def get_discovered_topics(
             target_age=target_age,
             duration=duration,
             language=language,
+            seed=seed,
         )
     except Exception as e:
         raise HTTPException(

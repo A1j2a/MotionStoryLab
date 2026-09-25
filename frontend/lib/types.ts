@@ -43,6 +43,7 @@ export interface TopicOpportunity {
   suggested_characters: string[];
   story_concept?: string;
   suggested_story_concept: string;
+  seo_tags?: string[];
 }
 
 export interface CharacterProfile {
@@ -248,6 +249,10 @@ export interface Scene {
   status: string;
   render_path?: string | null;
   error?: string | null;
+  provider?: string | null;
+  start_frame?: string | null;
+  end_frame?: string | null;
+  video_url?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -316,10 +321,20 @@ export interface AISettings {
   available_models: AIModelOption[];
 
   // Video Settings
-  openrouter_video_enabled: boolean;
-  openrouter_video_model: string;
+  video_provider?: string;
+  use_wan_video?: boolean;
+  available_video_providers?: { id: string; name: string; recommended?: boolean }[];
+  fal_key_configured?: boolean;
+  fal_key_masked?: string;
+  wan_model?: string;
+  wan_resolution?: string;
+  wan_test_mode?: boolean;
   video_aspect_ratio: string;
-  available_video_models: AIModelOption[];
+
+  // AI Thumbnail & Reference Image Settings
+  use_ai_thumbnail?: boolean;
+  use_ai_reference_images?: boolean;
+  ai_provider_test_mode?: boolean;
 
   // Thumbnail Settings
   thumbnail_generator_enabled: boolean;

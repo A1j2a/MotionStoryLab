@@ -9,6 +9,159 @@ def get_ffmpeg_path() -> str:
     return shutil.which("ffmpeg") or "/opt/homebrew/bin/ffmpeg"
 
 
+def get_ffprobe_path() -> str:
+    return shutil.which("ffprobe") or "/opt/homebrew/bin/ffprobe"
+
+
+def get_video_duration(video_path: str) -> float:
+    """Returns duration of video in seconds using ffprobe, or 0.0 on failure."""
+    if not os.path.exists(video_path):
+        return 0.0
+    ffprobe_bin = get_ffprobe_path()
+    try:
+        cmd = [
+            ffprobe_bin,
+            "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            video_path,
+        ]
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if res.returncode == 0 and res.stdout.strip():
+            return float(res.stdout.strip())
+    except Exception:
+        pass
+    return 0.0
+
+
+def extract_final_frame(video_path: str, output_image_path: str) -> str:
+    """
+    Extracts the very last frame of a video using FFmpeg for seamless scene continuity (FLF2V).
+    """
+    if not os.path.exists(video_path):
+        raise FileNotFoundError(f"Video file not found: {video_path}")
+
+    os.makedirs(os.path.dirname(os.path.abspath(output_image_path)), exist_ok=True)
+    ffmpeg_bin = get_ffmpeg_path()
+
+    # Try fast EOF seek first
+    cmd = [
+        ffmpeg_bin, "-y",
+        "-sseof", "-0.15",
+        "-i", video_path,
+        "-vframes", "1",
+        "-q:v", "2",
+        output_image_path,
+    ]
+    res = subprocess.run(cmd, capture_output=True, text=True)
+    if res.returncode == 0 and os.path.exists(output_image_path) and os.path.getsize(output_image_path) > 500:
+        return output_image_path
+
+    # Fallback: query duration and seek to (duration - 0.2s)
+    dur = get_video_duration(video_path)
+    seek_time = max(0.0, dur - 0.2)
+    cmd2 = [
+        ffmpeg_bin, "-y",
+        "-ss", f"{seek_time:.2f}",
+        "-i", video_path,
+        "-vframes", "1",
+        "-q:v", "2",
+        output_image_path,
+    ]
+    subprocess.run(cmd2, capture_output=True, text=True)
+    return output_image_path
+
+
+def extract_frame_at(video_path: str, output_image_path: str, timestamp_sec: float = 1.0) -> str:
+    """
+    Extracts a representative frame at the specified timestamp for character validation.
+    """
+    if not os.path.exists(video_path):
+        raise FileNotFoundError(f"Video file not found: {video_path}")
+
+    os.makedirs(os.path.dirname(os.path.abspath(output_image_path)), exist_ok=True)
+    ffmpeg_bin = get_ffmpeg_path()
+
+    cmd = [
+        ffmpeg_bin, "-y",
+        "-ss", f"{max(0.0, timestamp_sec):.2f}",
+        "-i", video_path,
+        "-vframes", "1",
+        "-q:v", "2",
+        output_image_path,
+    ]
+    subprocess.run(cmd, capture_output=True, text=True)
+    return output_image_path
+
+
+def adjust_video_duration(input_mp4: str, output_mp4: str, target_duration: float) -> str:
+    """
+    Adjusts video timing to match target scene duration (e.g. ~8 seconds) without altering SRT timings.
+    Uses FFmpeg PTS scaling or trimming/padding.
+    """
+    if not os.path.exists(input_mp4):
+        raise FileNotFoundError(f"Input video not found: {input_mp4}")
+
+    if target_duration <= 0:
+        target_duration = 5.0
+
+    current_dur = get_video_duration(input_mp4)
+    # If already close within 0.25 seconds, keep as is
+    if current_dur > 0 and abs(current_dur - target_duration) < 0.25:
+        if os.path.abspath(input_mp4) != os.path.abspath(output_mp4):
+            shutil.copy2(input_mp4, output_mp4)
+        return output_mp4
+
+    ffmpeg_bin = get_ffmpeg_path()
+    os.makedirs(os.path.dirname(os.path.abspath(output_mp4)), exist_ok=True)
+    temp_out = output_mp4 if os.path.abspath(input_mp4) != os.path.abspath(output_mp4) else output_mp4 + ".dur.mp4"
+
+    if current_dur > 0 and current_dur > target_duration:
+        # Trim excess frames to target duration
+        cmd = [
+            ffmpeg_bin, "-y",
+            "-i", input_mp4,
+            "-t", f"{target_duration:.3f}",
+            "-c:v", "libx264",
+            "-pix_fmt", "yuv420p",
+            "-movflags", "+faststart",
+            temp_out,
+        ]
+    elif current_dur > 0 and current_dur < target_duration:
+        # Scale PTS to smoothly stretch motion to target duration
+        scale_factor = target_duration / current_dur
+        cmd = [
+            ffmpeg_bin, "-y",
+            "-i", input_mp4,
+            "-vf", f"setpts={scale_factor:.4f}*PTS",
+            "-c:v", "libx264",
+            "-pix_fmt", "yuv420p",
+            "-movflags", "+faststart",
+            temp_out,
+        ]
+    else:
+        # Fallback simple duration flag
+        cmd = [
+            ffmpeg_bin, "-y",
+            "-i", input_mp4,
+            "-t", f"{target_duration:.3f}",
+            "-c:v", "libx264",
+            "-pix_fmt", "yuv420p",
+            "-movflags", "+faststart",
+            temp_out,
+        ]
+
+    res = subprocess.run(cmd, capture_output=True, text=True)
+    if res.returncode == 0 and os.path.exists(temp_out) and os.path.getsize(temp_out) > 1000:
+        if temp_out != output_mp4:
+            shutil.move(temp_out, output_mp4)
+        return output_mp4
+    else:
+        if os.path.abspath(input_mp4) != os.path.abspath(output_mp4):
+            shutil.copy2(input_mp4, output_mp4)
+        return output_mp4
+
+
 def concatenate_scenes(
     scene_video_paths: List[str],
     output_merged_path: str,

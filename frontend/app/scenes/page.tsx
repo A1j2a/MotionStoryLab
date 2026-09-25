@@ -125,13 +125,24 @@ export default function ScenesPage() {
               >
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-[#EA580C] font-mono">
-                      Shot #{String(scene.scene_number).padStart(2, "0")} • {scene.duration}s
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-[#EA580C] font-mono">
+                        Shot #{String(scene.scene_number).padStart(2, "0")} • {scene.duration}s
+                      </span>
+                      {scene.provider && (
+                        <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-200">
+                          {scene.provider}
+                        </span>
+                      )}
+                    </div>
                     <span
                       className={`text-[10px] font-bold uppercase px-2.5 py-0.5 rounded border ${
                         scene.status === "COMPLETED"
                           ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                          : scene.status === "FAILED"
+                          ? "bg-red-50 text-red-700 border-red-200"
+                          : scene.status === "PROCESSING" || scene.status === "GENERATING"
+                          ? "bg-purple-50 text-purple-700 border-purple-200 animate-pulse"
                           : "bg-[#FFF7ED] text-[#C2410C] border-[#FED7AA]"
                       }`}
                     >
@@ -141,11 +152,19 @@ export default function ScenesPage() {
 
                   <div>
                     <h3 className="font-bold text-base text-[#1D1D1F]">
-                      {scene.environment}
+                      {typeof scene.environment === "object" && scene.environment !== null
+                        ? (scene.environment as any).name || (scene.environment as any).id || "Preschool Meadow"
+                        : String(scene.environment || "Preschool Meadow")}
                     </h3>
                     {scene.lyrics && (
                       <p className="text-xs text-[#6E6E73] italic mt-1 bg-[#FAFAFC] border border-[#E5E5EA] p-3 rounded-xl">
                         "{scene.lyrics}"
+                      </p>
+                    )}
+                    {scene.error && (
+                      <p className="text-xs text-red-700 bg-red-50 border border-red-200 p-2.5 rounded-xl mt-1.5 flex items-start gap-1.5">
+                        <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-red-600" />
+                        <span>{scene.error}</span>
                       </p>
                     )}
                   </div>
@@ -179,10 +198,14 @@ export default function ScenesPage() {
 
                   <button
                     onClick={() => handleRegenerate(scene.id, scene.scene_number)}
-                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#EA580C] hover:text-[#C2410C] transition-colors cursor-pointer"
+                    className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-lg border transition-colors cursor-pointer ${
+                      scene.status === "FAILED"
+                        ? "bg-red-50 border-red-200 text-red-700 hover:bg-red-100"
+                        : "bg-white border-[#E5E5EA] text-[#EA580C] hover:bg-orange-50 hover:text-[#C2410C]"
+                    }`}
                   >
                     <RotateCcw className="w-3.5 h-3.5" />
-                    <span>Reset Shot</span>
+                    <span>{scene.status === "FAILED" ? "Retry Scene" : "Regenerate Shot"}</span>
                   </button>
                 </div>
               </div>

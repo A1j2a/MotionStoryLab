@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { Scene } from "@/lib/types";
+import { useState, useEffect } from "react";
+import { Scene, AISettings } from "@/lib/types";
 import { api } from "@/lib/api";
 import {
   Clapperboard,
@@ -17,19 +17,28 @@ import {
   Copy,
   Check,
   Film,
+  Video,
+  Cpu,
+  Zap,
 } from "lucide-react";
 
 interface StoryboardViewProps {
   projectId: string;
   scenes: Scene[];
   onSceneRerendered?: () => void;
+  onScenesUpdated?: (scenes: Scene[]) => void;
+  initialSceneDuration?: number;
 }
 
 export function StoryboardView({
   projectId,
   scenes,
   onSceneRerendered,
+  onScenesUpdated,
+  initialSceneDuration = 8,
 }: StoryboardViewProps) {
+  const [sceneDuration, setSceneDuration] = useState<number>(initialSceneDuration);
+  const [regeneratingStoryboard, setRegeneratingStoryboard] = useState(false);
   const [rerenderingId, setRerenderingId] = useState<string | null>(null);
   const [validationResult, setValidationResult] = useState<{ is_valid: boolean; errors: string[] } | null>(null);
   const [validating, setValidating] = useState(false);
@@ -37,6 +46,26 @@ export function StoryboardView({
   const [copiedAllPrompts, setCopiedAllPrompts] = useState(false);
   const [copiedSceneId, setCopiedSceneId] = useState<string | null>(null);
   const [copiedPromptId, setCopiedPromptId] = useState<string | null>(null);
+  const [aiSettings, setAiSettings] = useState<AISettings | null>(null);
+
+  useEffect(() => {
+    api.getAISettings().then(setAiSettings).catch(() => {});
+  }, []);
+
+  const handleRegenerateStoryboard = async (dur: number) => {
+    setSceneDuration(dur);
+    setRegeneratingStoryboard(true);
+    try {
+      const updated = await api.generateStoryboard(projectId, dur);
+      if (onScenesUpdated) {
+        onScenesUpdated(updated);
+      }
+    } catch (err: any) {
+      alert("Failed to regenerate storyboard: " + (err?.message || err));
+    } finally {
+      setRegeneratingStoryboard(false);
+    }
+  };
 
   const handleRerender = async (sceneId: string, sceneNum: number) => {
     setRerenderingId(sceneId);
@@ -197,6 +226,91 @@ ${prompt}`;
         </div>
       </div>
 
+      {/* PER-SCENE DURATION FILTER BAR */}
+      <div className="bg-[#F8FAFC] border border-[#E2E8F0] rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
+        <div className="flex items-center gap-2">
+          <Clock className="w-4 h-4 text-blue-600 shrink-0" />
+          <div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-bold text-[#1E293B]">
+                Per-Scene Target Duration Filter:
+              </span>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800">
+                Current: {sceneDuration}s / scene
+              </span>
+            </div>
+            <p className="text-[11px] text-[#64748B]">
+              Controls pacing, lyric chunking, and clip length before video generation (8s, 9s, 10s).
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1.5">
+          {[6, 7, 8, 9, 10, 12].map((dur) => (
+            <button
+              key={dur}
+              onClick={() => handleRegenerateStoryboard(dur)}
+              disabled={regeneratingStoryboard}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                sceneDuration === dur
+                  ? "bg-blue-600 text-white shadow-xs"
+                  : "bg-white text-[#475569] border border-[#CBD5E1] hover:bg-blue-50 hover:text-blue-700"
+              } disabled:opacity-50`}
+            >
+              {dur}s {dur === 8 ? "★" : ""}
+            </button>
+          ))}
+
+          <button
+            onClick={() => handleRegenerateStoryboard(sceneDuration)}
+            disabled={regeneratingStoryboard}
+            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:opacity-95 text-white rounded-xl text-xs font-bold shadow-xs transition-all cursor-pointer disabled:opacity-50 ml-1"
+          >
+            <RotateCcw className={`w-3.5 h-3.5 ${regeneratingStoryboard ? "animate-spin" : ""}`} />
+            <span>{regeneratingStoryboard ? "Re-Planning..." : `Apply (${sceneDuration}s)`}</span>
+          </button>
+        </div>
+      </div>
+
+      {/* ACTIVE AI ENGINE INFORMATION BAR */}
+      <div className="bg-[#FAF5FF] border border-[#E9D5FF] rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center shrink-0">
+            <Video className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-bold text-[#1D1D1F]">
+                Active AI Video Engine:
+              </span>
+              <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-purple-200/70 text-purple-900 font-mono">
+                {aiSettings?.use_wan_video || aiSettings?.video_provider === "wan"
+                  ? `Wan 2.1 FLF2V (${aiSettings?.wan_model || "fal-ai/wan-flf2v"})`
+                  : "Local Storybook 3D Engine (Instant)"}
+              </span>
+              {aiSettings?.ai_provider_test_mode && (
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
+                  ⚡ Fast Test Mode
+                </span>
+              )}
+            </div>
+            <p className="text-[11px] text-[#6E6E73] mt-0.5">
+              {aiSettings?.use_wan_video || aiSettings?.video_provider === "wan"
+                ? "Cloud AI Diffusion Engine: Generates full photorealistic 3D video (~20-40s per scene). You can switch to Instant Local 3D in Settings."
+                : "Local Storybook Engine: Generates instant 3D video previews on Apple Silicon."}
+            </p>
+          </div>
+        </div>
+
+        <a
+          href="/settings"
+          className="inline-flex items-center gap-1 text-xs font-semibold text-purple-700 hover:text-purple-900 bg-white border border-[#E9D5FF] px-3 py-1.5 rounded-xl transition-all shrink-0 self-start sm:self-auto"
+        >
+          <Cpu className="w-3.5 h-3.5" />
+          <span>Change AI Model</span>
+        </a>
+      </div>
+
       {validationResult && (
         <div
           className={`p-4 rounded-2xl border text-xs font-semibold ${
@@ -345,7 +459,11 @@ ${prompt}`;
 
                   <div className="flex items-center gap-1.5">
                     <Tv className="w-3.5 h-3.5 text-[#86868B] shrink-0" />
-                    <span className="truncate font-medium">{sc.environment || "Preschool Meadow"}</span>
+                    <span className="truncate font-medium">
+                      {typeof sc.environment === "object" && sc.environment !== null
+                        ? (sc.environment as any).name || (sc.environment as any).id || "Preschool Meadow"
+                        : String(sc.environment || "Preschool Meadow")}
+                    </span>
                   </div>
                 </div>
               </div>

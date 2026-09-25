@@ -238,20 +238,36 @@ class OllamaProvider(BaseAIProvider):
 
     def __init__(self, base_url: Optional[str] = None, model: Optional[str] = None):
         self.base_url = (base_url or os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")).rstrip("/")
-        self.model = model or os.environ.get("OLLAMA_MODEL", "llama3.2")
+        requested_model = model or os.environ.get("OLLAMA_MODEL", "")
+        self.model = requested_model or self._detect_installed_model()
+
+    def _detect_installed_model(self) -> str:
+        try:
+            req = urllib.request.Request(f"{self.base_url}/api/tags")
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                if resp.status == 200:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    models = data.get("models", [])
+                    if models:
+                        detected = models[0].get("name") or models[0].get("model")
+                        if detected:
+                            return detected
+        except Exception:
+            pass
+        return "qwen2.5:1.5b"
 
     def _call_api(self, prompt: str, system_prompt: str = "", temperature: float = 0.7) -> Optional[str]:
-        target_url = f"{self.base_url}/v1/chat/completions"
+        # 1. Native /api/chat endpoint
+        target_url = f"{self.base_url}/api/chat"
         headers = {"Content-Type": "application/json"}
-
         payload = {
             "model": self.model,
             "messages": [
                 {"role": "system", "content": system_prompt or "You are an expert preschool animation & music creator. Return valid JSON only."},
                 {"role": "user", "content": prompt},
             ],
-            "temperature": temperature,
-            "max_tokens": 2500,
+            "stream": False,
+            "options": {"temperature": temperature},
         }
 
         try:
@@ -264,10 +280,38 @@ class OllamaProvider(BaseAIProvider):
             with urllib.request.urlopen(req, timeout=60) as response:
                 if response.status == 200:
                     data = json.loads(response.read().decode("utf-8"))
-                    return data["choices"][0]["message"]["content"]
+                    msg = data.get("message", {})
+                    content = msg.get("content", "")
+                    if content:
+                        return content
         except Exception as e:
-            logger.warning(f"Ollama call to {target_url} failed: {e}")
-            return None
+            logger.warning(f"Ollama native call to {target_url} failed: {e}")
+
+        # 2. Fallback to /v1/chat/completions
+        try:
+            v1_url = f"{self.base_url}/v1/chat/completions"
+            v1_payload = {
+                "model": self.model,
+                "messages": [
+                    {"role": "system", "content": system_prompt or "You are an expert preschool animation & music creator. Return valid JSON only."},
+                    {"role": "user", "content": prompt},
+                ],
+                "temperature": temperature,
+                "max_tokens": 2500,
+            }
+            req = urllib.request.Request(
+                v1_url,
+                data=json.dumps(v1_payload).encode("utf-8"),
+                headers=headers,
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=60) as response:
+                if response.status == 200:
+                    data = json.loads(response.read().decode("utf-8"))
+                    return data["choices"][0]["message"]["content"]
+        except Exception as e2:
+            logger.warning(f"Ollama v1 fallback failed: {e2}")
+
         return None
 
     def generate_json(self, prompt: str, system_prompt: str = "", max_tokens: Optional[int] = None) -> Optional[Dict[str, Any]]:
@@ -383,167 +427,6 @@ def get_ai_provider() -> BaseAIProvider:
     return OllamaProvider()
 
 
-class OpenRouterVideoProvider:
-    """
-    OpenRouter Video Generation Gateway (ByteDance Seedance 2.0 Mini, Kling AI, Luma Ray 2, MiniMax).
-    Submits generation jobs to OpenRouter API /videos endpoint and polls for completion.
-    """
-
-    def __init__(
-        self,
-        api_key: Optional[str] = None,
-        model: Optional[str] = None,
-        aspect_ratio: Optional[str] = None,
-        base_url: Optional[str] = None,
-    ):
-        db_key = _get_db_config("OPENROUTER_API_KEY")
-        db_model = _get_db_config("OPENROUTER_VIDEO_MODEL")
-        db_ratio = _get_db_config("VIDEO_ASPECT_RATIO")
-
-        self.api_key = (api_key or db_key or os.environ.get("OPENROUTER_API_KEY", "")).strip()
-        self.model = (model or db_model or os.environ.get("OPENROUTER_VIDEO_MODEL", "bytedance/seedance-2.0-mini")).strip()
-        self.aspect_ratio = (aspect_ratio or db_ratio or os.environ.get("VIDEO_ASPECT_RATIO", "16:9")).strip()
-        self.base_url = (base_url or os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")).rstrip("/")
-        self.last_error = ""
-
-    def submit_video_job(
-        self,
-        prompt: str,
-        model: Optional[str] = None,
-        aspect_ratio: Optional[str] = None,
-    ) -> Optional[Dict[str, Any]]:
-        if not self.api_key:
-            self.last_error = "OpenRouter API Key not set. Please configure in Settings."
-            logger.warning(self.last_error)
-            return None
-
-        used_model = (model or self.model or "bytedance/seedance-2.0-mini").strip()
-        used_ratio = (aspect_ratio or self.aspect_ratio or "16:9").strip()
-
-        target_url = f"{self.base_url}/videos"
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.api_key}",
-            "HTTP-Referer": "http://127.0.0.1:3000",
-            "X-Title": "MotionStoryLab Video Engine",
-        }
-
-        payload = {
-            "model": used_model,
-            "prompt": prompt,
-            "aspect_ratio": used_ratio,
-        }
-
-        try:
-            logger.info(f"Submitting OpenRouter video request to {target_url} (Model: {used_model}, Ratio: {used_ratio})")
-            req = urllib.request.Request(
-                target_url,
-                data=json.dumps(payload).encode("utf-8"),
-                headers=headers,
-                method="POST",
-            )
-            with urllib.request.urlopen(req, timeout=45) as response:
-                if response.status in (200, 201, 202):
-                    res_body = json.loads(response.read().decode("utf-8"))
-                    job_id = res_body.get("id")
-                    polling_url = res_body.get("polling_url") or f"{target_url}/{job_id}"
-                    return {
-                        "id": job_id,
-                        "polling_url": polling_url,
-                        "status": res_body.get("status", "pending"),
-                        "model": used_model,
-                        "aspect_ratio": used_ratio,
-                        "raw": res_body,
-                    }
-        except urllib.error.HTTPError as e:
-            err_text = ""
-            try:
-                err_body = json.loads(e.read().decode("utf-8"))
-                err_text = err_body.get("error", {}).get("message", str(e))
-            except Exception:
-                err_text = str(e)
-            self.last_error = f"HTTP {e.code}: {err_text}"
-            logger.error(f"OpenRouter Video submission failed: {self.last_error}")
-            return None
-        except Exception as e:
-            self.last_error = str(e)
-            logger.error(f"OpenRouter Video submission error: {e}")
-            return None
-
-    def poll_for_video(
-        self,
-        polling_url: str,
-        max_wait_sec: int = 240,
-        poll_interval_sec: int = 5,
-    ) -> Optional[str]:
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "HTTP-Referer": "http://127.0.0.1:3000",
-        }
-
-        start_time = time.time()
-        while time.time() - start_time < max_wait_sec:
-            try:
-                req = urllib.request.Request(polling_url, headers=headers, method="GET")
-                with urllib.request.urlopen(req, timeout=30) as response:
-                    if response.status == 200:
-                        status_data = json.loads(response.read().decode("utf-8"))
-                        status = status_data.get("status", "").lower()
-                        logger.info(f"Polling OpenRouter video status: {status}")
-
-                        if status == "completed":
-                            unsigned = status_data.get("unsigned_urls", [])
-                            if unsigned and isinstance(unsigned, list) and len(unsigned) > 0:
-                                return unsigned[0]
-                            urls = status_data.get("urls", [])
-                            if urls and isinstance(urls, list) and len(urls) > 0:
-                                return urls[0]
-                            video_url = status_data.get("video_url") or status_data.get("url")
-                            if video_url:
-                                return video_url
-                            return None
-                        elif status in ("failed", "error", "cancelled"):
-                            err_msg = status_data.get("error", "Generation failed on server")
-                            self.last_error = str(err_msg)
-                            logger.error(f"OpenRouter video generation failed: {self.last_error}")
-                            return None
-            except Exception as e:
-                logger.warning(f"Retrying poll ({e})...")
-
-            time.sleep(poll_interval_sec)
-
-        self.last_error = f"Video generation timed out after {max_wait_sec} seconds."
-        return None
-
-    def generate_and_download_video(
-        self,
-        prompt: str,
-        output_path: str,
-        model: Optional[str] = None,
-        aspect_ratio: Optional[str] = None,
-        max_wait_sec: int = 240,
-    ) -> bool:
-        job = self.submit_video_job(prompt, model=model, aspect_ratio=aspect_ratio)
-        if not job or not job.get("polling_url"):
-            return False
-
-        video_url = self.poll_for_video(job["polling_url"], max_wait_sec=max_wait_sec)
-        if not video_url:
-            return False
-
-        try:
-            logger.info(f"Downloading completed video from {video_url} to {output_path}")
-            os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
-            urllib.request.urlretrieve(video_url, output_path)
-            if os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
-                return True
-            else:
-                self.last_error = "Downloaded video file is empty or corrupted."
-                return False
-        except Exception as e:
-            self.last_error = f"Failed to download video from {video_url}: {e}"
-            logger.error(self.last_error)
-            return False
 
 
 class OpenRouterImageProvider:

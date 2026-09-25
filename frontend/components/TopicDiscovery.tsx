@@ -42,12 +42,14 @@ export function TopicDiscovery({ onSelectTopic }: TopicDiscoveryProps) {
     customLimit?: number,
     customAge?: string,
     customDur?: string,
-    customLang?: string
+    customLang?: string,
+    customSeed?: number
   ) => {
     const limitToUse = customLimit !== undefined ? customLimit : suggestionsLimit;
     const ageToUse = customAge !== undefined ? customAge : targetAge;
     const durToUse = customDur !== undefined ? customDur : duration;
     const langToUse = customLang !== undefined ? customLang : language;
+    const seedToUse = customSeed !== undefined ? customSeed : Date.now();
 
     setLoading(true);
     setErrorMessage(null);
@@ -57,6 +59,7 @@ export function TopicDiscovery({ onSelectTopic }: TopicDiscoveryProps) {
         target_age: ageToUse,
         duration: durToUse,
         language: langToUse,
+        seed: seedToUse,
       });
       if (Array.isArray(data) && data.length > 0) {
         setTopics(data);
@@ -84,7 +87,7 @@ export function TopicDiscovery({ onSelectTopic }: TopicDiscoveryProps) {
       .catch(() => {});
 
     // Automatically load initial topics on page load
-    fetchTopics(8, "2–5 Years", "2–3 Minutes (Standard)", "English (US/UK)");
+    fetchTopics(8, "2–5 Years", "2–3 Minutes (Standard)", "English (US/UK)", 1001);
   }, []);
 
   return (
@@ -108,12 +111,12 @@ export function TopicDiscovery({ onSelectTopic }: TopicDiscoveryProps) {
             Find Today&apos;s High-Engagement Kids & Nursery Rhyme Topics
           </h2>
           <p className="text-xs text-[#6E6E73] leading-relaxed">
-            Live AI evaluates search intent, preschool trends, and audio-visual opportunity signals to generate structured candidates in real-time.
+            Live AI evaluates search intent, preschool trends, and audio-visual opportunity signals to generate structured candidates with 10M+ view potential in real-time.
           </p>
         </div>
 
         <button
-          onClick={() => fetchTopics(suggestionsLimit, targetAge, duration, language)}
+          onClick={() => fetchTopics(suggestionsLimit, targetAge, duration, language, Date.now())}
           disabled={loading}
           className="inline-flex items-center justify-center gap-2 bg-gradient-to-r from-[#FF6B00] to-[#EA580C] hover:opacity-95 text-white text-xs font-bold px-6 py-3.5 rounded-2xl shadow-md shadow-orange-500/20 transition-all cursor-pointer whitespace-nowrap disabled:opacity-50"
         >
@@ -125,7 +128,7 @@ export function TopicDiscovery({ onSelectTopic }: TopicDiscoveryProps) {
           ) : (
             <>
               <Flame className="w-4 h-4 fill-white" />
-              <span>🔥 Find Today&apos;s Kids Topics</span>
+              <span>🔥 Generate Fresh Rhyme Topics (Million-View Potential)</span>
             </>
           )}
         </button>
@@ -155,7 +158,7 @@ export function TopicDiscovery({ onSelectTopic }: TopicDiscoveryProps) {
               onChange={(e) => {
                 const val = e.target.value;
                 setTargetAge(val);
-                fetchTopics(suggestionsLimit, val, duration, language);
+                fetchTopics(suggestionsLimit, val, duration, language, Date.now());
               }}
               className="w-full bg-[#FAFAFC] border border-[#E5E5EA] rounded-xl px-3 py-2 text-xs text-[#1D1D1F] font-medium focus:outline-none focus:border-[#FF6B00] cursor-pointer"
             >
@@ -177,7 +180,7 @@ export function TopicDiscovery({ onSelectTopic }: TopicDiscoveryProps) {
               onChange={(e) => {
                 const val = e.target.value;
                 setDuration(val);
-                fetchTopics(suggestionsLimit, targetAge, val, language);
+                fetchTopics(suggestionsLimit, targetAge, val, language, Date.now());
               }}
               className="w-full bg-[#FAFAFC] border border-[#E5E5EA] rounded-xl px-3 py-2 text-xs text-[#1D1D1F] font-medium focus:outline-none focus:border-blue-500 cursor-pointer"
             >
@@ -198,7 +201,7 @@ export function TopicDiscovery({ onSelectTopic }: TopicDiscoveryProps) {
               onChange={(e) => {
                 const val = e.target.value;
                 setLanguage(val);
-                fetchTopics(suggestionsLimit, targetAge, duration, val);
+                fetchTopics(suggestionsLimit, targetAge, duration, val, Date.now());
               }}
               className="w-full bg-[#FAFAFC] border border-[#E5E5EA] rounded-xl px-3 py-2 text-xs text-[#1D1D1F] font-medium focus:outline-none focus:border-emerald-500 cursor-pointer"
             >
@@ -221,7 +224,7 @@ export function TopicDiscovery({ onSelectTopic }: TopicDiscoveryProps) {
               onChange={(e) => {
                 const val = Number(e.target.value);
                 setSuggestionsLimit(val);
-                fetchTopics(val, targetAge, duration, language);
+                fetchTopics(val, targetAge, duration, language, Date.now());
               }}
               className="w-full bg-[#FAFAFC] border border-[#E5E5EA] rounded-xl px-3 py-2 text-xs text-[#1D1D1F] font-medium focus:outline-none focus:border-purple-500 cursor-pointer"
             >
@@ -242,7 +245,7 @@ export function TopicDiscovery({ onSelectTopic }: TopicDiscoveryProps) {
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <button
-              onClick={() => fetchTopics(suggestionsLimit, targetAge, duration, language)}
+              onClick={() => fetchTopics(suggestionsLimit, targetAge, duration, language, Date.now())}
               className="px-3 py-1.5 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 flex items-center gap-1 cursor-pointer"
             >
               <RefreshCw className="w-3 h-3" />
@@ -270,9 +273,14 @@ export function TopicDiscovery({ onSelectTopic }: TopicDiscoveryProps) {
               {topics.length} Candidates Available
             </span>
           </div>
-          <span className="text-[11px] font-medium text-[#86868B]">
-            Showing all {topics.length} of {suggestionsLimit} requested
-          </span>
+          <button
+            onClick={() => fetchTopics(suggestionsLimit, targetAge, duration, language, Date.now())}
+            disabled={loading}
+            className="text-[11px] font-bold text-[#FF6B00] hover:underline flex items-center gap-1 cursor-pointer"
+          >
+            <RefreshCw className={`w-3 h-3 ${loading ? "animate-spin" : ""}`} />
+            <span>Shuffle Topics</span>
+          </button>
         </div>
       )}
 
@@ -325,6 +333,20 @@ export function TopicDiscovery({ onSelectTopic }: TopicDiscoveryProps) {
                     <div className="flex items-center gap-1.5 text-[10px] text-[#86868B]">
                       <Users2 className="w-3 h-3 text-[#FF6B00] shrink-0" />
                       <span className="truncate">{t.suggested_characters.join(", ")}</span>
+                    </div>
+                  )}
+
+                  {/* SEO & High-CPM Tags */}
+                  {(t.seo_tags || t.search_keywords) && (
+                    <div className="flex flex-wrap gap-1 pt-1">
+                      {(t.seo_tags || t.search_keywords.slice(0, 3)).slice(0, 3).map((tag, sIdx) => (
+                        <span
+                          key={sIdx}
+                          className="text-[9px] font-bold px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-100 truncate max-w-[120px]"
+                        >
+                          {tag.startsWith("#") ? tag : `#${tag.replace(/\s+/g, "")}`}
+                        </span>
+                      ))}
                     </div>
                   )}
                 </div>

@@ -230,81 +230,110 @@ async def run_project_pipeline(project_id: str):
             await session.commit()
 
         # ==========================================
-        # STAGE 5: INDIVIDUAL 3D SCENE RENDERING
+        # STAGE 5: INDIVIDUAL SCENE RENDERING (WAN FLF2V / BLENDER 3D)
         # ==========================================
-        logger.info(f"[{project_id}] Stage 5: Rendering {len(scenes_data)} 3D Scenes Individually")
+        logger.info(f"[{project_id}] Stage 5: Rendering {len(scenes_data)} Scenes via VideoGenerationProvider")
         async with db_session.AsyncSessionLocal() as session:
             db_job = await session.get(Job, job.id)
             if db_job:
                 db_job.status = JobStatus.SCENE_RENDERING
-                db_job.current_step = "RENDERING_INDIVIDUAL_3D_SCENES"
+                db_job.current_step = "RENDERING_INDIVIDUAL_SCENES"
                 db_job.progress = 65
             await session.commit()
 
+        from ai.video_provider import get_video_provider
+        from renderer.compositor import extract_final_frame
+        video_provider = get_video_provider()
+        logger.info(f"[{project_id}] Active Video Provider: {video_provider.name}")
+
         scene_video_paths = []
         num_scenes = len(scenes_data)
+        prev_last_frame = None
+
+        # Check if development test mode is active (Section 17)
+        is_test_mode = os.environ.get("VIDEO_GENERATION_TEST_MODE", "false").lower() in ("true", "1", "yes")
+        if is_test_mode:
+            logger.info(f"[{project_id}] VIDEO_GENERATION_TEST_MODE=true: Will only render Scene 1 for verification.")
+
+        char_bible_list = content_pkg.get("characters", [])
+        env_bible_list = content_pkg.get("environments", [])
+        env_bible_dict = env_bible_list[0] if (env_bible_list and len(env_bible_list) > 0) else {"name": "Preschool Environment"}
 
         for idx, shot in enumerate(scenes_data, start=1):
+            if is_test_mode and idx > 1:
+                logger.info(f"[{project_id}] Test mode active: Skipping scene {idx} of {num_scenes}.")
+                break
+
             scene_mp4 = os.path.join(scenes_dir, f"scene_{idx:03d}.mp4")
             verse_lyrics = shot.get("lyrics", "") or f"{topic} Scene {idx}"
+            scene_duration = float(shot.get("duration", 8.0))
 
-            # 0. Check OpenRouter Video Engine (Seedance 2.0 / Kling / Luma)
-            video_engine_ok = False
-            try:
-                from app.api.v1.settings_api import get_db_config
-                from ai.providers import OpenRouterVideoProvider
-                db_video_on = get_db_config("OPENROUTER_VIDEO_ENABLED", "false").lower() in ("true", "1", "yes")
-                if db_video_on:
-                    v_provider = OpenRouterVideoProvider()
-                    prompt = f"3D Pixar cute animation, {topic}, preschool cartoon show, action: {verse_lyrics}, vibrant colors, smooth camera"
-                    video_engine_ok = await asyncio.to_thread(
-                        v_provider.generate_and_download_video,
-                        prompt=prompt,
-                        output_path=scene_mp4,
-                    )
-            except Exception as ve:
-                logger.warning(f"OpenRouter Video generation bypassed: {ve}")
+            # Execute generation via VideoGenerationProvider abstraction
+            gen_result = await asyncio.to_thread(
+                video_provider.generate_scene_video,
+                scene_number=idx,
+                topic=topic,
+                lyrics=verse_lyrics,
+                duration_sec=scene_duration,
+                output_mp4=scene_mp4,
+                project_id=project_id,
+                scene_id=shot.get("scene_id", f"scene_{idx:03d}"),
+                character_bible=char_bible_list,
+                environment_bible=env_bible_dict,
+                camera=shot.get("camera"),
+                lighting=shot.get("lighting"),
+                actions=shot.get("actions"),
+                start_frame_path=prev_last_frame,
+                previous_scene_id=f"scene_{idx-1:03d}" if idx > 1 else None,
+                next_scene_id=f"scene_{idx+1:03d}" if idx < num_scenes else None,
+                custom_prompt=shot.get("video_prompt"),
+            )
 
-            # 1. Render true 3D scene via Blender 5.2 Metal GPU engine
-            blender_ok = False
-            if not video_engine_ok or not os.path.exists(scene_mp4) or os.path.getsize(scene_mp4) < 1000:
-                try:
-                    from renderer.blender_runner import render_blender_3d_scene
-                    blender_ok = await asyncio.to_thread(
-                        render_blender_3d_scene,
-                        scene_number=idx,
-                        topic=topic,
-                        verse_text=verse_lyrics,
-                        duration_sec=float(shot.get("duration", 5.0)),
-                        output_mp4=scene_mp4,
-                    )
-                except Exception as be:
-                    logger.warning(f"Blender 3D scene render bypassed: {be}")
-
-            # 2. Fallback to Illustrated Storybook Engine if Blender was unconfigured
-            if not blender_ok or not os.path.exists(scene_mp4) or os.path.getsize(scene_mp4) < 1000:
+            # Fallback to Illustrated Storybook Engine if external provider failed and video is missing
+            if not gen_result.get("success") or not os.path.exists(scene_mp4) or os.path.getsize(scene_mp4) < 1000:
+                logger.warning(f"Provider {video_provider.name} did not produce video for Scene {idx}. Triggering storybook fallback...")
                 await asyncio.to_thread(
                     render_illustrated_scene,
                     scene_number=idx,
                     topic=topic,
                     verse_text=verse_lyrics,
-                    duration_sec=float(shot.get("duration", 5.0)),
+                    duration_sec=scene_duration,
                     output_mp4=scene_mp4,
                     width=1280,
                     height=720,
                     fps=24,
                 )
 
-            if os.path.exists(scene_mp4):
+            if os.path.exists(scene_mp4) and os.path.getsize(scene_mp4) > 1000:
                 scene_video_paths.append(scene_mp4)
+                # Extract final frame for subsequent scene start frame (A -> B -> C -> D continuity)
+                next_start_frame = os.path.join(scenes_dir, f"scene_{idx:03d}_last_frame.jpg")
+                try:
+                    extract_final_frame(scene_mp4, next_start_frame)
+                    prev_last_frame = next_start_frame
+                except Exception as fe:
+                    logger.debug(f"Could not extract next start frame: {fe}")
 
             async with db_session.AsyncSessionLocal() as session:
                 stmt = select(Scene).where(Scene.project_id == project_id, Scene.scene_number == idx)
                 res = await session.execute(stmt)
                 db_sc = res.scalars().first()
                 if db_sc:
-                    db_sc.status = "COMPLETED"
+                    db_sc.status = "COMPLETED" if (os.path.exists(scene_mp4) and os.path.getsize(scene_mp4) > 1000) else "FAILED"
                     db_sc.render_path = scene_mp4
+                    db_sc.local_video_path = scene_mp4
+                    db_sc.generation_status = db_sc.status
+                    db_sc.provider = gen_result.get("provider", video_provider.name)
+                    db_sc.provider_request_id = gen_result.get("request_id")
+                    db_sc.video_url = gen_result.get("video_url")
+                    db_sc.start_frame = gen_result.get("start_frame")
+                    db_sc.end_frame = gen_result.get("end_frame")
+                    db_sc.negative_prompt = gen_result.get("negative_prompt")
+                    db_sc.generation_attempt = gen_result.get("attempts", 1)
+                    db_sc.previous_scene_id = f"scene_{idx-1:03d}" if idx > 1 else None
+                    db_sc.next_scene_id = f"scene_{idx+1:03d}" if idx < num_scenes else None
+                    if not gen_result.get("success"):
+                        db_sc.error = gen_result.get("error")
 
                 db_job = await session.get(Job, job.id)
                 if db_job:

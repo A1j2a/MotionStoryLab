@@ -124,11 +124,11 @@ export default function WorkflowEnginePage() {
       stageNum: 2,
       title: "3D Character Studio",
       subtitle: "Procedural Geometry & Rigging",
-      port: "Blender 5.2.2 / ComfyUI (8188)",
+      port: "Storybook 3D / ComfyUI (8188)",
       status: "connected",
       icon: Box,
       role: "Dynamic 3D Geometry & Facial Rigging",
-      tech: "Blender Python API & Principled BSDF",
+      tech: "Storybook 3D API & Cartoon Shading",
       color: "#3B82F6",
       inputs: [
         "Character Bible JSON",
@@ -141,7 +141,7 @@ export default function WorkflowEnginePage() {
         "Modular Stage Props (Beds, Clouds, Cars)",
       ],
       description: "Constructs procedural 3D preschool character meshes tailored specifically to the project theme with smooth rounded geometry and vibrant candy hues.",
-      launchCmd: "blender -b --python blender/render_scene.py",
+      launchCmd: "python3 -m renderer.storybook_engine",
     },
     {
       id: "audio_studio",
@@ -171,12 +171,12 @@ export default function WorkflowEnginePage() {
       id: "metal_render",
       stageNum: 4,
       title: "Headless 3D Render Engine",
-      subtitle: "Blender EEVEE (Metal GPU)",
-      port: "/opt/homebrew/bin/blender",
+      subtitle: "Wan FLF2V / Storybook 3D",
+      port: "Wan 2.1 FLF2V / FFmpeg",
       status: "connected",
       icon: Tv,
-      role: "Metal GPU Shot Cinematics",
-      tech: "Apple Silicon Metal Acceleration",
+      role: "AI 3D Video & Shot Cinematics",
+      tech: "Wan FLF2V & Metal FFmpeg Canvas",
       color: "#8B5CF6",
       inputs: [
         "Shot Sequence Timeline",
@@ -188,8 +188,8 @@ export default function WorkflowEnginePage() {
         "scene_002.mp4 (Dynamic Action Track)",
         "scene_003.mp4 (Hero Character Smile & Wave)",
       ],
-      description: "Renders 1280x720 24fps frames headlessly using Apple Silicon M4 Metal GPU shaders with distinct camera choreography for each musical phrase.",
-      launchCmd: "blender -b --python blender/render_scene.py -- scene_config.json",
+      description: "Renders 1280x720 24fps frames headlessly using Wan FLF2V AI video generation or Local Storybook 3D with distinct camera choreography for each musical phrase.",
+      launchCmd: "python3 -m renderer.storybook_engine --scene-config scene_config.json",
     },
     {
       id: "ffmpeg_master",
@@ -427,7 +427,7 @@ export default function WorkflowEnginePage() {
                 Continuous Signal Flow:
               </span>
               <span className="text-[11px]">
-                Stage 01 (Topics/Lyrics) ➔ Stage 02 (3D Characters) ➔ Stage 03 (Suno Audio) ➔ Stage 04 (Blender GPU) ➔ Stage 05 (FFmpeg) ➔ Stage 06 (YouTube)
+                Stage 01 (Topics/Lyrics) ➔ Stage 02 (3D Characters) ➔ Stage 03 (Suno Audio) ➔ Stage 04 (Wan/3D Engine) ➔ Stage 05 (FFmpeg) ➔ Stage 06 (YouTube)
               </span>
             </div>
             <span className="font-mono text-[11px] text-[#86868B]">

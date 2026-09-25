@@ -92,9 +92,16 @@ export const api = {
     openrouter_enabled: boolean;
     openrouter_api_key?: string;
     openrouter_model?: string;
-    openrouter_video_enabled?: boolean;
-    openrouter_video_model?: string;
+    video_provider?: string;
+    use_wan_video?: boolean;
+    fal_key?: string;
+    wan_model?: string;
+    wan_resolution?: string;
+    wan_test_mode?: boolean;
     video_aspect_ratio?: string;
+    use_ai_thumbnail?: boolean;
+    use_ai_reference_images?: boolean;
+    ai_provider_test_mode?: boolean;
     thumbnail_generator_enabled?: boolean;
     thumbnail_engine?: string;
     thumbnail_model?: string;
@@ -112,15 +119,16 @@ export const api = {
     }),
 
   // Step 1: Topics Discovery & Selection with Filters
-  discoverTopics: (options?: number | { limit?: number; target_age?: string; duration?: string; language?: string }) => {
+  discoverTopics: (options?: number | { limit?: number; target_age?: string; duration?: string; language?: string; seed?: number }) => {
     if (typeof options === "number") {
-      return request<TopicOpportunity[]>(`/api/v1/topics/discover?limit=${options}`, {}, 90000);
+      return request<TopicOpportunity[]>(`/api/v1/topics/discover?limit=${options}&seed=${Date.now()}`, {}, 90000);
     }
     const params = new URLSearchParams();
     params.set("limit", String(options?.limit || 8));
     if (options?.target_age && options.target_age !== "all") params.set("target_age", options.target_age);
     if (options?.duration) params.set("duration", options.duration);
     if (options?.language) params.set("language", options.language);
+    params.set("seed", String(options?.seed || Date.now()));
     return request<TopicOpportunity[]>(`/api/v1/topics/discover?${params.toString()}`, {}, 90000);
   },
   selectTopic: (payload: Partial<TopicOpportunity>) =>
@@ -179,10 +187,14 @@ export const api = {
     `${API_BASE}/api/v1/projects/${projectId}/song`,
 
   // Step 8, 9, 10, 13: Storyboard, Scene Rendering, and Re-rendering
-  generateStoryboard: (projectId: string) =>
-    request<any[]>(`/api/v1/projects/${projectId}/storyboard/generate`, {
-      method: "POST",
-    }, 90000),
+  generateStoryboard: (projectId: string, targetSceneDuration?: number) =>
+    request<any[]>(
+      `/api/v1/projects/${projectId}/storyboard/generate${targetSceneDuration ? `?target_scene_duration=${targetSceneDuration}` : ""}`,
+      {
+        method: "POST",
+      },
+      90000
+    ),
   validateStoryboard: (projectId: string) =>
     request<{ is_valid: boolean; errors: string[]; total_scenes: number; total_duration: number }>(
       `/api/v1/projects/${projectId}/storyboard/validate`
@@ -369,13 +381,7 @@ export const api = {
       60000
     ),
 
-  // Video & Thumbnail AI Tests
-  testVideoConnection: (payload: { api_key?: string; model?: string; aspect_ratio?: string; prompt?: string }) =>
-    request<any>("/api/v1/settings/video/test", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }, 45000),
-
+  // Thumbnail AI Test
   testThumbnailConnection: (payload: { title?: string; topic?: string; model?: string; aspect_ratio?: string }) =>
     request<any>("/api/v1/settings/thumbnail/test", {
       method: "POST",

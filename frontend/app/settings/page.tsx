@@ -67,13 +67,19 @@ export default function SettingsPage() {
   const [copiedKey, setCopiedKey] = useState(false);
 
   // Video Settings State
-  const [videoEnabled, setVideoEnabled] = useState(false);
-  const [videoModel, setVideoModel] = useState("bytedance/seedance-2.0-mini");
-  const [customVideoModel, setCustomVideoModel] = useState("");
+  // Wan & AI Provider Settings State
+  const [videoProvider, setVideoProvider] = useState("wan");
+  const [useWanVideo, setUseWanVideo] = useState(false);
+  const [useAiThumbnail, setUseAiThumbnail] = useState(false);
+  const [useAiReferenceImages, setUseAiReferenceImages] = useState(false);
+  const [aiProviderTestMode, setAiProviderTestMode] = useState(false);
+  const [falKey, setFalKey] = useState("");
+  const [showFalKey, setShowFalKey] = useState(false);
+  const [wanModel, setWanModel] = useState("fal-ai/wan-flf2v");
+  const [wanResolution, setWanResolution] = useState("720p");
+  const [wanTestMode, setWanTestMode] = useState(false);
   const [videoAspectRatio, setVideoAspectRatio] = useState("16:9");
-  const [testingVideo, setTestingVideo] = useState(false);
-  const [videoTestResult, setVideoTestResult] = useState<any | null>(null);
-  const [videoTestError, setVideoTestError] = useState<string | null>(null);
+  const [falKeySaved, setFalKeySaved] = useState(false);
 
   // Thumbnail Settings State
   const [thumbEnabled, setThumbEnabled] = useState(true);
@@ -134,8 +140,17 @@ export default function SettingsPage() {
       if (data.openrouter_api_key) {
         setApiKey(data.openrouter_api_key);
       }
-      setVideoEnabled(data.openrouter_video_enabled || false);
-      setVideoModel(data.openrouter_video_model || "bytedance/seedance-2.0-mini");
+      setVideoProvider(data.video_provider || "wan");
+      setUseWanVideo(data.use_wan_video !== undefined ? data.use_wan_video : (data.video_provider === "wan"));
+      setUseAiThumbnail(data.use_ai_thumbnail !== undefined ? data.use_ai_thumbnail : false);
+      setUseAiReferenceImages(data.use_ai_reference_images !== undefined ? data.use_ai_reference_images : false);
+      setAiProviderTestMode(data.ai_provider_test_mode !== undefined ? data.ai_provider_test_mode : (data.wan_test_mode || false));
+      if (data.fal_key_masked) {
+        setFalKey(data.fal_key_masked);
+      }
+      setWanModel(data.wan_model || "fal-ai/wan-flf2v");
+      setWanResolution(data.wan_resolution || "720p");
+      setWanTestMode(data.wan_test_mode || false);
       setVideoAspectRatio(data.video_aspect_ratio || "16:9");
       setThumbEnabled(data.thumbnail_generator_enabled !== undefined ? data.thumbnail_generator_enabled : true);
       setThumbModel(data.thumbnail_model || "high_ctr_graphic");
@@ -160,9 +175,13 @@ export default function SettingsPage() {
 
   const handleSaveAISettings = async (
     overrideEnabled?: boolean,
-    overrideVideoEnabled?: boolean,
     overrideThumbEnabled?: boolean,
-    overrideAutoSong?: boolean
+    overrideAutoSong?: boolean,
+    overrideVideoProvider?: string,
+    overrideWanVideo?: boolean,
+    overrideAiThumb?: boolean,
+    overrideAiRef?: boolean,
+    overrideTestMode?: boolean
   ) => {
     setSavingAI(true);
     setSaveSuccess(false);
@@ -170,19 +189,29 @@ export default function SettingsPage() {
     setTestError(null);
 
     const isEnabled = overrideEnabled !== undefined ? overrideEnabled : enabled;
-    const isVideoEnabled = overrideVideoEnabled !== undefined ? overrideVideoEnabled : videoEnabled;
     const isThumbEnabled = overrideThumbEnabled !== undefined ? overrideThumbEnabled : thumbEnabled;
     const isAutoSongEnabled = overrideAutoSong !== undefined ? overrideAutoSong : autoSongEnabled;
+    const isVideoProvider = overrideVideoProvider !== undefined ? overrideVideoProvider : videoProvider;
+    const isWanVideo = overrideWanVideo !== undefined ? overrideWanVideo : (useWanVideo || isVideoProvider === "wan");
+    const isAiThumb = overrideAiThumb !== undefined ? overrideAiThumb : useAiThumbnail;
+    const isAiRef = overrideAiRef !== undefined ? overrideAiRef : useAiReferenceImages;
+    const isTestMode = overrideTestMode !== undefined ? overrideTestMode : (aiProviderTestMode || wanTestMode);
     const modelToSave = customModel.trim() ? customModel.trim() : selectedModel;
-    const videoModelToSave = customVideoModel.trim() ? customVideoModel.trim() : videoModel;
 
     try {
       const updated = await api.updateAISettings({
         openrouter_enabled: isEnabled,
         openrouter_api_key: apiKey.trim() ? apiKey.trim() : undefined,
         openrouter_model: modelToSave,
-        openrouter_video_enabled: isVideoEnabled,
-        openrouter_video_model: videoModelToSave,
+        video_provider: isVideoProvider,
+        use_wan_video: isWanVideo,
+        use_ai_thumbnail: isAiThumb,
+        use_ai_reference_images: isAiRef,
+        ai_provider_test_mode: isTestMode,
+        fal_key: falKey.trim() && !falKey.includes("***") ? falKey.trim() : undefined,
+        wan_model: wanModel,
+        wan_resolution: wanResolution,
+        wan_test_mode: isTestMode,
         video_aspect_ratio: videoAspectRatio,
         thumbnail_generator_enabled: isThumbEnabled,
         thumbnail_model: thumbModel,
@@ -191,14 +220,28 @@ export default function SettingsPage() {
       });
       setAiSettings(updated);
       setEnabled(updated.openrouter_enabled);
-      setVideoEnabled(updated.openrouter_video_enabled);
+      setVideoProvider(updated.video_provider || "wan");
+      setUseWanVideo(updated.use_wan_video !== undefined ? updated.use_wan_video : (updated.video_provider === "wan"));
+      setUseAiThumbnail(updated.use_ai_thumbnail || false);
+      setUseAiReferenceImages(updated.use_ai_reference_images || false);
+      setAiProviderTestMode(updated.ai_provider_test_mode || updated.wan_test_mode || false);
+      if (updated.fal_key_masked) {
+        setFalKey(updated.fal_key_masked);
+      }
+      setWanModel(updated.wan_model || "fal-ai/wan-flf2v");
+      setWanResolution(updated.wan_resolution || "720p");
+      setWanTestMode(updated.wan_test_mode || false);
       setThumbEnabled(updated.thumbnail_generator_enabled);
       setAutoSongEnabled(updated.auto_song_generation_enabled !== false);
       if (updated.openrouter_api_key) {
         setApiKey(updated.openrouter_api_key);
       }
       setSaveSuccess(true);
-      setTimeout(() => setSaveSuccess(false), 3000);
+      setFalKeySaved(true);
+      setTimeout(() => {
+        setSaveSuccess(false);
+        setFalKeySaved(false);
+      }, 3000);
     } catch (err: any) {
       alert("Failed to save AI settings: " + err.message);
     } finally {
@@ -209,25 +252,19 @@ export default function SettingsPage() {
   const handleToggleOpenRouter = async () => {
     const nextState = !enabled;
     setEnabled(nextState);
-    await handleSaveAISettings(nextState, videoEnabled, thumbEnabled);
-  };
-
-  const handleToggleVideo = async () => {
-    const nextState = !videoEnabled;
-    setVideoEnabled(nextState);
-    await handleSaveAISettings(enabled, nextState, thumbEnabled);
+    await handleSaveAISettings(nextState, thumbEnabled, autoSongEnabled);
   };
 
   const handleToggleAutoSong = async () => {
     const nextState = !autoSongEnabled;
     setAutoSongEnabled(nextState);
-    await handleSaveAISettings(enabled, videoEnabled, thumbEnabled, nextState);
+    await handleSaveAISettings(enabled, thumbEnabled, nextState);
   };
 
   const handleToggleThumbnail = async () => {
     const nextState = !thumbEnabled;
     setThumbEnabled(nextState);
-    await handleSaveAISettings(enabled, videoEnabled, nextState);
+    await handleSaveAISettings(enabled, nextState, autoSongEnabled);
   };
 
   const handleTestConnection = async () => {
@@ -247,28 +284,6 @@ export default function SettingsPage() {
       setTestError(err.message || "Connection failed.");
     } finally {
       setTesting(false);
-    }
-  };
-
-  const handleTestVideo = async () => {
-    setTestingVideo(true);
-    setVideoTestResult(null);
-    setVideoTestError(null);
-
-    const modelToTest = customVideoModel.trim() ? customVideoModel.trim() : videoModel;
-
-    try {
-      const res = await api.testVideoConnection({
-        api_key: apiKey.trim() ? apiKey.trim() : undefined,
-        model: modelToTest,
-        aspect_ratio: videoAspectRatio,
-        prompt: "Cute 3D preschool character dancing on a colorful playground, 8k vibrant cartoon animation",
-      });
-      setVideoTestResult(res);
-    } catch (err: any) {
-      setVideoTestError(err.message || "Video test submission failed.");
-    } finally {
-      setTestingVideo(false);
     }
   };
 
@@ -354,7 +369,7 @@ export default function SettingsPage() {
     <>
       <Header
         title="Studio Settings & AI Engine Hub"
-        subtitle="Configure OpenRouter LLM, ByteDance Seedance Video Generation, High-CTR Thumbnail Engine, and local tool daemons"
+        subtitle="Configure OpenRouter LLM, Wan FLF2V Video Generation, High-CTR Thumbnail Engine, and local tool daemons"
       />
 
       <main className="p-8 space-y-6 flex-1 max-w-4xl mx-auto w-full">
@@ -609,7 +624,7 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        {/* 2. OpenRouter Video Generation Engine (Seedance 2.0 / Kling AI / Luma Ray 2) */}
+        {/* 2. Wan Video Generation Engine (fal-ai/wan-flf2v) - Replaces Blender 3D */}
         <div className="bg-white border border-[#E5E5EA] rounded-2xl p-6 space-y-6 shadow-xs relative overflow-hidden">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-[#E5E5EA] gap-4">
             <div className="flex items-center gap-3">
@@ -619,43 +634,49 @@ export default function SettingsPage() {
               <div>
                 <div className="flex items-center gap-2">
                   <h2 className="text-base font-bold text-[#1D1D1F]">
-                    OpenRouter Video Generation Engine
+                    Wan Video Generation Engine
                   </h2>
                   <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-[#FAF5FF] text-[#9333EA] border border-[#E9D5FF]">
-                    ByteDance Seedance 2.0
+                    {videoProvider === "wan" || useWanVideo ? "Wan 2.1 FLF2V (Active)" : "Local Storybook 3D (Active)"}
                   </span>
                 </div>
                 <p className="text-xs text-[#86868B] mt-0.5">
-                  Generate complete animated 3D video scenes directly from text prompts & characters
+                  First-Frame to Last-Frame (FLF2V) AI 3D Animation & Scene Continuity Engine
                 </p>
               </div>
             </div>
 
-            {/* Video Toggle Switch */}
+            {/* Video Toggle Switch: ON (Wan FLF2V) / OFF (Local Storybook 3D) */}
             <div className="flex items-center gap-3 self-start sm:self-auto">
               <span className="text-xs font-semibold text-[#86868B]">
-                {videoEnabled ? (
+                {videoProvider === "wan" || useWanVideo ? (
                   <span className="text-[#059669] flex items-center gap-1 font-bold">
                     <span className="w-2 h-2 rounded-full bg-[#10B981] animate-pulse"></span>
-                    ON (Active)
+                    ON (Wan FLF2V Active)
                   </span>
                 ) : (
-                  <span className="text-[#6B7280]">OFF (Using Local 3D Engine)</span>
+                  <span className="text-[#6B7280]">OFF (Local 3D Storybook Engine)</span>
                 )}
               </span>
 
               <button
-                onClick={handleToggleVideo}
+                onClick={async () => {
+                  const nextWan = !(videoProvider === "wan" || useWanVideo);
+                  const nextProvider = nextWan ? "wan" : "local";
+                  setVideoProvider(nextProvider);
+                  setUseWanVideo(nextWan);
+                  await handleSaveAISettings(enabled, thumbEnabled, autoSongEnabled, nextProvider, nextWan);
+                }}
                 disabled={savingAI}
                 className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                  videoEnabled ? "bg-[#9333EA]" : "bg-[#D1D5DB]"
+                  videoProvider === "wan" || useWanVideo ? "bg-[#9333EA]" : "bg-[#D1D5DB]"
                 }`}
                 role="switch"
-                aria-checked={videoEnabled}
+                aria-checked={videoProvider === "wan" || useWanVideo}
               >
                 <span
                   className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
-                    videoEnabled ? "translate-x-5" : "translate-x-0"
+                    videoProvider === "wan" || useWanVideo ? "translate-x-5" : "translate-x-0"
                   }`}
                 />
               </button>
@@ -663,134 +684,226 @@ export default function SettingsPage() {
           </div>
 
           <div className="space-y-4">
+            {/* OPTIONAL AI PROVIDER TOGGLES GRID (Section 2 of Safe Integration Spec) */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-4 bg-[#FAF5FF] border border-[#E9D5FF] rounded-2xl">
+              {/* 1. Use Wan Video Generation */}
+              <div className="bg-white p-3 rounded-xl border border-[#E9D5FF] flex items-center justify-between">
+                <div>
+                  <span className="text-xs font-bold text-[#1D1D1F] block">Use Wan Video</span>
+                  <span className="text-[10px] text-[#6E6E73]">{useWanVideo ? "ON (Fal.ai FLF2V)" : "OFF (Local 3D)"}</span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={useWanVideo}
+                  onChange={async (e) => {
+                    const checked = e.target.checked;
+                    setUseWanVideo(checked);
+                    setVideoProvider(checked ? "wan" : "local");
+                    await handleSaveAISettings(enabled, thumbEnabled, autoSongEnabled, checked ? "wan" : "local", checked);
+                  }}
+                  className="w-4 h-4 text-[#9333EA] rounded border-[#E5E5EA] focus:ring-[#9333EA] cursor-pointer"
+                />
+              </div>
+
+              {/* 2. Use AI Thumbnail Generation */}
+              <div className="bg-white p-3 rounded-xl border border-[#E9D5FF] flex items-center justify-between">
+                <div>
+                  <span className="text-xs font-bold text-[#1D1D1F] block">Use AI Thumbnail</span>
+                  <span className="text-[10px] text-[#6E6E73]">{useAiThumbnail ? "ON (AI Image + Overlay)" : "OFF (Graphic Engine)"}</span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={useAiThumbnail}
+                  onChange={async (e) => {
+                    const checked = e.target.checked;
+                    setUseAiThumbnail(checked);
+                    await handleSaveAISettings(enabled, thumbEnabled, autoSongEnabled, videoProvider, useWanVideo, checked);
+                  }}
+                  className="w-4 h-4 text-[#9333EA] rounded border-[#E5E5EA] focus:ring-[#9333EA] cursor-pointer"
+                />
+              </div>
+
+              {/* 3. Use AI Reference Image */}
+              <div className="bg-white p-3 rounded-xl border border-[#E9D5FF] flex items-center justify-between">
+                <div>
+                  <span className="text-xs font-bold text-[#1D1D1F] block">Use AI Reference Images</span>
+                  <span className="text-[10px] text-[#6E6E73]">{useAiReferenceImages ? "ON (AI Continuity)" : "OFF (Procedural)"}</span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={useAiReferenceImages}
+                  onChange={async (e) => {
+                    const checked = e.target.checked;
+                    setUseAiReferenceImages(checked);
+                    await handleSaveAISettings(enabled, thumbEnabled, autoSongEnabled, videoProvider, useWanVideo, useAiThumbnail, checked);
+                  }}
+                  className="w-4 h-4 text-[#9333EA] rounded border-[#E5E5EA] focus:ring-[#9333EA] cursor-pointer"
+                />
+              </div>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Video Model Selector */}
+              {/* FAL API Key Input & Update */}
+              <div>
+                <label className="text-xs font-bold text-[#1D1D1F] block mb-1.5 flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <Key className="w-3.5 h-3.5 text-[#6B7280]" />
+                    <span>Fal.ai API Key (FAL_KEY)</span>
+                  </div>
+                  {aiSettings?.fal_key_configured ? (
+                    <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+                      ✓ Key Configured
+                    </span>
+                  ) : (
+                    <span className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
+                      ⚠ Key Needed for Live Wan
+                    </span>
+                  )}
+                </label>
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <input
+                      type={showFalKey ? "text" : "password"}
+                      value={falKey}
+                      onChange={(e) => setFalKey(e.target.value)}
+                      placeholder="Enter fal_key_..."
+                      className="w-full bg-[#FAFAFA] border border-[#E5E5EA] rounded-xl pl-3 pr-14 py-2.5 text-xs text-[#1D1D1F] font-mono focus:bg-white focus:outline-none focus:border-[#9333EA]"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowFalKey(!showFalKey)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-[#86868B] hover:text-[#1D1D1F] text-xs font-medium cursor-pointer"
+                    >
+                      {showFalKey ? "Hide" : "Show"}
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleSaveAISettings()}
+                    disabled={savingAI || !falKey.trim()}
+                    className="px-3.5 py-2.5 bg-[#9333EA] text-white rounded-xl text-xs font-bold hover:bg-[#7E22CE] transition-all cursor-pointer disabled:opacity-50 flex items-center gap-1.5 shadow-xs shrink-0"
+                  >
+                    <span>{falKeySaved ? "✓ Updated" : savingAI ? "Saving..." : "Update Key"}</span>
+                  </button>
+                </div>
+                <p className="text-[11px] text-[#86868B] mt-1">
+                  Used securely server-side for <code className="bg-slate-100 px-1 py-0.5 rounded">fal-ai/wan-flf2v</code>. Never exposed to browser or client.
+                </p>
+              </div>
+
+              {/* Wan Model Selection */}
               <div>
                 <label className="text-xs font-bold text-[#1D1D1F] block mb-1.5 flex items-center gap-1.5">
                   <Film className="w-3.5 h-3.5 text-[#6B7280]" />
-                  <span>Video Model</span>
+                  <span>Wan Model Endpoint</span>
                 </label>
                 <select
-                  value={videoModel}
-                  onChange={(e) => {
-                    setVideoModel(e.target.value);
-                    setCustomVideoModel("");
-                  }}
+                  value={wanModel}
+                  onChange={(e) => setWanModel(e.target.value)}
                   className="w-full bg-[#FAFAFA] border border-[#E5E5EA] rounded-xl px-3 py-2.5 text-xs text-[#1D1D1F] font-medium focus:bg-white focus:outline-none focus:border-[#9333EA] cursor-pointer"
                 >
-                  {(aiSettings?.available_video_models || [
-                    { id: "bytedance/seedance-2.0-mini", name: "ByteDance Seedance 2.0 Mini (Default - High Speed 3D)" },
-                    { id: "bytedance/seedance-2.0", name: "ByteDance Seedance 2.0 Pro (Ultra HD 3D)" },
-                    { id: "klingai/kling-v1.6-standard", name: "Kling AI 1.6 Standard" },
-                    { id: "klingai/kling-v1.6-pro", name: "Kling AI 1.6 Pro" },
-                    { id: "luma/ray-2", name: "Luma Ray 2" },
-                    { id: "minimax/video-01", name: "MiniMax Video 01" },
-                  ]).map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.name}
-                    </option>
-                  ))}
+                  <option value="fal-ai/wan-flf2v">fal-ai/wan-flf2v (First-Frame to Last-Frame - Recommended)</option>
+                  <option value="fal-ai/wan/v2.1/image-to-video">fal-ai/wan/v2.1/image-to-video (Image to Video)</option>
+                  <option value="fal-ai/wan/v2.1/text-to-video">fal-ai/wan/v2.1/text-to-video (Text to Video)</option>
                 </select>
-              </div>
 
-              {/* Video Aspect Ratio Selector */}
-              <div>
-                <label className="text-xs font-bold text-[#1D1D1F] block mb-1.5 flex items-center gap-1.5">
-                  <Clapperboard className="w-3.5 h-3.5 text-[#6B7280]" />
-                  <span>Default Video Format (Aspect Ratio)</span>
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setVideoAspectRatio("16:9")}
-                    className={`px-3 py-2 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-2 cursor-pointer ${
-                      videoAspectRatio === "16:9"
-                        ? "bg-[#FAF5FF] border-[#9333EA] text-[#9333EA] shadow-xs"
-                        : "bg-[#FAFAFA] border-[#E5E5EA] text-[#6B7280] hover:bg-white"
-                    }`}
+                <div className="mt-3">
+                  <label className="text-xs font-bold text-[#1D1D1F] block mb-1.5 flex items-center gap-1.5">
+                    <Monitor className="w-3.5 h-3.5 text-[#6B7280]" />
+                    <span>Resolution</span>
+                  </label>
+                  <select
+                    value={wanResolution}
+                    onChange={(e) => setWanResolution(e.target.value)}
+                    className="w-full bg-[#FAFAFA] border border-[#E5E5EA] rounded-xl px-3 py-2 text-xs text-[#1D1D1F] font-medium focus:bg-white focus:outline-none focus:border-[#9333EA] cursor-pointer"
                   >
-                    <Monitor className="w-4 h-4" />
-                    <span>16:9 (YouTube Widescreen - Default)</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setVideoAspectRatio("9:16")}
-                    className={`px-3 py-2 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-2 cursor-pointer ${
-                      videoAspectRatio === "9:16"
-                        ? "bg-[#FAF5FF] border-[#9333EA] text-[#9333EA] shadow-xs"
-                        : "bg-[#FAFAFA] border-[#E5E5EA] text-[#6B7280] hover:bg-white"
-                    }`}
-                  >
-                    <Smartphone className="w-4 h-4" />
-                    <span>9:16 (Shorts / Reels / TikTok)</span>
-                  </button>
+                    <option value="720p">720p (Default - Fast & High Quality)</option>
+                    <option value="1080p">1080p (Full HD)</option>
+                    <option value="480p">480p (Fast Draft)</option>
+                  </select>
                 </div>
               </div>
             </div>
 
-            {/* Custom Video Model Input */}
-            <div className="pt-2">
-              <label className="text-[11px] font-semibold text-[#6B7280] block mb-1">
-                Or enter any custom video model slug from OpenRouter:
+            {/* Video Aspect Ratio Selector */}
+            <div>
+              <label className="text-xs font-bold text-[#1D1D1F] block mb-1.5 flex items-center gap-1.5">
+                <Clapperboard className="w-3.5 h-3.5 text-[#6B7280]" />
+                <span>Video Aspect Ratio</span>
               </label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setVideoAspectRatio("16:9")}
+                  className={`px-3 py-2 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                    videoAspectRatio === "16:9"
+                      ? "bg-[#FAF5FF] border-[#9333EA] text-[#9333EA] shadow-xs"
+                      : "bg-[#FAFAFA] border-[#E5E5EA] text-[#6B7280] hover:bg-white"
+                  }`}
+                >
+                  <Monitor className="w-4 h-4" />
+                  <span>16:9 (YouTube Widescreen - Default)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setVideoAspectRatio("9:16")}
+                  className={`px-3 py-2 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                    videoAspectRatio === "9:16"
+                      ? "bg-[#FAF5FF] border-[#9333EA] text-[#9333EA] shadow-xs"
+                      : "bg-[#FAFAFA] border-[#E5E5EA] text-[#6B7280] hover:bg-white"
+                  }`}
+                >
+                  <Smartphone className="w-4 h-4" />
+                  <span>9:16 (Shorts / Reels / TikTok)</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Fast Development Test Mode Toggle */}
+            <div className="flex items-center justify-between p-3.5 rounded-xl bg-[#FAF5FF] border border-[#E9D5FF]">
+              <div className="flex items-center gap-2.5">
+                <Sparkles className="w-4 h-4 text-[#9333EA] shrink-0" />
+                <div>
+                  <span className="text-xs font-bold text-[#1D1D1F] block">
+                    Fast Development Test Mode (AI_PROVIDER_TEST_MODE)
+                  </span>
+                  <span className="text-[11px] text-[#6E6E73]">
+                    When enabled, generates ONLY 1 thumbnail, 1 reference image, and 1 video scene to verify Wan FLF2V and character continuity safely.
+                  </span>
+                </div>
+              </div>
               <input
-                type="text"
-                placeholder="e.g. bytedance/seedance-2.0-mini, klingai/kling-v1.6-pro"
-                value={customVideoModel}
-                onChange={(e) => setCustomVideoModel(e.target.value)}
-                className="w-full bg-[#FAFAFA] border border-[#E5E5EA] rounded-xl px-3 py-1.5 text-xs font-mono text-[#1D1D1F] focus:bg-white focus:outline-none focus:border-[#9333EA]"
+                type="checkbox"
+                checked={aiProviderTestMode || wanTestMode}
+                onChange={async (e) => {
+                  const checked = e.target.checked;
+                  setAiProviderTestMode(checked);
+                  setWanTestMode(checked);
+                  await handleSaveAISettings(enabled, thumbEnabled, autoSongEnabled, videoProvider, useWanVideo, useAiThumbnail, useAiReferenceImages, checked);
+                }}
+                className="w-4 h-4 text-[#9333EA] rounded border-[#E5E5EA] focus:ring-[#9333EA] cursor-pointer"
               />
             </div>
 
-            {/* Test Video Button */}
-            <div className="flex items-center justify-between pt-2">
-              <button
-                type="button"
-                onClick={handleTestVideo}
-                disabled={testingVideo}
-                className="px-4 py-2 rounded-xl text-xs font-semibold bg-[#FAF5FF] text-[#9333EA] hover:bg-[#F3E8FF] border border-[#E9D5FF] transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-              >
-                {testingVideo ? (
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin text-[#9333EA]" />
-                ) : (
-                  <Video className="w-3.5 h-3.5 text-[#9333EA]" />
-                )}
-                <span>{testingVideo ? "Submitting Video Test..." : "Test OpenRouter Video Submission"}</span>
-              </button>
+            {/* Save Button for Video Provider Settings */}
+            <div className="flex items-center justify-between pt-2 border-t border-[#E5E5EA]">
+              <div className="text-[11px] text-[#6E6E73]">
+                {videoProvider === "wan" || useWanVideo
+                  ? "Wan FLF2V AI video generation active."
+                  : "Local 3D Storybook engine is active (Blender-free)."}
+              </div>
 
               <button
                 type="button"
                 onClick={() => handleSaveAISettings()}
                 disabled={savingAI}
-                className="px-4 py-2 rounded-xl text-xs font-bold bg-[#9333EA] text-white hover:bg-[#7E22CE] shadow-xs transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                className="px-5 py-2.5 bg-[#9333EA] text-white rounded-xl text-xs font-bold hover:bg-[#7E22CE] transition-all cursor-pointer disabled:opacity-50 flex items-center gap-1.5 shadow-xs"
               >
                 <Sparkles className="w-3.5 h-3.5" />
-                <span>Save Video Config</span>
+                <span>{savingAI ? "Saving..." : "Save Wan & Provider Settings"}</span>
               </button>
             </div>
-
-            {videoTestResult && (
-              <div className="bg-[#FAF5FF] border border-[#E9D5FF] p-3.5 rounded-xl text-xs space-y-1 animate-in fade-in duration-200">
-                <div className="flex items-center gap-2 text-[#7E22CE] font-bold">
-                  <CheckCircle2 className="w-4 h-4 text-[#9333EA]" />
-                  <span>{videoTestResult.message}</span>
-                </div>
-                <p className="text-[11px] text-[#6B21A8] pl-6 font-mono">
-                  Job ID: {videoTestResult.job_id} &bull; Model: {videoTestResult.model} &bull; Aspect Ratio: {videoTestResult.aspect_ratio}
-                </p>
-              </div>
-            )}
-
-            {videoTestError && (
-              <div className="bg-[#FEF2F2] border border-[#FECACA] p-3.5 rounded-xl text-xs space-y-1 animate-in fade-in duration-200">
-                <div className="flex items-center gap-2 text-[#991B1B] font-bold">
-                  <XCircle className="w-4 h-4 text-[#EF4444]" />
-                  <span>Video Test Error</span>
-                </div>
-                <p className="text-[11px] text-[#B91C1C] pl-6 font-mono">{videoTestError}</p>
-              </div>
-            )}
           </div>
         </div>
 

@@ -162,7 +162,7 @@ if [ -f "${SCRIPT_DIR}/frontend/package.json" ]; then
         # npm run dev or npm start mode
         ORIG_DIR="$(pwd)"
         cd "${SCRIPT_DIR}/frontend"
-        nohup ./node_modules/.bin/next start -H 127.0.0.1 -p "${FRONTEND_PORT}" > "${SCRIPT_DIR}/logs/frontend.log" 2>&1 &
+        nohup npx next start -H 127.0.0.1 -p "${FRONTEND_PORT}" > "${SCRIPT_DIR}/logs/frontend.log" 2>&1 &
         FRONTEND_PID=$!
         disown ${FRONTEND_PID} 2>/dev/null || true
         echo ${FRONTEND_PID} > "${PID_DIR}/frontend.pid"

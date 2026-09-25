@@ -13,7 +13,7 @@ interface LiveTerminalProps {
 const AVAILABLE_LOGS = [
   { file: "app.log", label: "Studio Core (FastAPI)" },
   { file: "ai.log", label: "AI Planning & OpenRouter" },
-  { file: "blender.log", label: "Blender 3D Render Engine" },
+  { file: "render.log", label: "Storybook 3D Render Engine" },
   { file: "ffmpeg.log", label: "FFmpeg Video Compositor" },
   { file: "tts.log", label: "Kokoro TTS Voice Service" },
   { file: "ollama.log", label: "Ollama Local AI" },
@@ -92,7 +92,7 @@ export function LiveTerminal({
     if (lower.includes("step") || lower.includes("stage") || lower.includes("starting") || lower.includes("generating") || lower.includes("rendering")) {
       return "text-cyan-300 font-semibold";
     }
-    if (lower.includes("openrouter") || lower.includes("blender") || lower.includes("suno") || lower.includes("fastapi")) {
+    if (lower.includes("openrouter") || lower.includes("storybook") || lower.includes("wan") || lower.includes("suno") || lower.includes("fastapi")) {
       return "text-purple-300";
     }
     return "text-slate-300";

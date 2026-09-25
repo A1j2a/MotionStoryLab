@@ -29,7 +29,7 @@ export default function LogsPage() {
   const LOG_OPTIONS = [
     { name: "app.log", label: "Studio Core (FastAPI)", desc: "Main Orchestration & Database Logs" },
     { name: "ai.log", label: "AI Planning / OpenRouter", desc: "Topic Discovery, Lyrics & Storyboard" },
-    { name: "blender.log", label: "Blender 3D Engine", desc: "3D GPU Render Frames & Camera Paths" },
+    { name: "render.log", label: "Storybook 3D Engine", desc: "3D Animation Frames & Camera Paths" },
     { name: "ffmpeg.log", label: "FFmpeg Compositor", desc: "Video Concat & Audio Muxing Stream" },
     { name: "tts.log", label: "Kokoro Voice Engine", desc: "Neural TTS Audio Synthesis" },
     { name: "ollama.log", label: "Ollama Local AI", desc: "Local LLaMA GPU Inference" },
@@ -101,7 +101,7 @@ export default function LogsPage() {
     <>
       <Header
         title="Live Diagnostic & Tool Engine Logs"
-        subtitle="Real-time multi-tool streaming terminal for FastAPI, OpenRouter, Blender 3D, and Audio synthesis"
+        subtitle="Real-time multi-tool streaming terminal for FastAPI, OpenRouter, Storybook 3D, and Audio synthesis"
       />
 
       <main className="p-8 space-y-6 flex-1 max-w-6xl mx-auto w-full">

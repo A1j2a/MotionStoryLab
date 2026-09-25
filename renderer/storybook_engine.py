@@ -31,6 +31,16 @@ def _create_storybook_frame(
     is_farm = any(w in t for w in ["cow", "duck", "farm", "sheep", "animal", "old macdonald"]) and not is_dino
     is_fruit = any(w in t for w in ["fruit", "apple", "banana", "berry", "food"]) and not is_dino
 
+    if not HAS_PILLOW:
+        ffmpeg_bin = get_ffmpeg_path()
+        subprocess.run(
+            [ffmpeg_bin, "-y", "-f", "lavfi", "-i", f"color=c=0x38bdf8:s={width}x{height}", "-frames:v", "1", output_png],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        return
+
     img = Image.new("RGB", (width, height), (56, 189, 248))
     draw = ImageDraw.Draw(img)
 

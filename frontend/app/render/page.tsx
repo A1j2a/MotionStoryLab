@@ -63,7 +63,7 @@ export default function RenderPipelinePage() {
     <>
       <Header
         title="Render & Pipeline Monitor"
-        subtitle="Monitor sequential orchestration across Pixar-grade 3D Blender, multi-track audio, and FFmpeg"
+        subtitle="Monitor sequential orchestration across Pixar-grade Storybook 3D / Wan, multi-track audio, and FFmpeg"
       />
 
       <main className="p-8 space-y-6 flex-1 max-w-6xl mx-auto w-full">

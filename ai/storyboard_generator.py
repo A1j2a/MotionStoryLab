@@ -43,6 +43,7 @@ def generate_storyboard(
     characters: List[Dict[str, Any]],
     environments: List[Dict[str, Any]],
     visual_bible: Optional[Dict[str, Any]] = None,
+    target_scene_duration: float = 8.0,
 ) -> List[Dict[str, Any]]:
     """
     Generates structured 3D animation scene timeline based on:
@@ -50,8 +51,9 @@ def generate_storyboard(
     - audio timeline (actual song duration, sections, lyric timestamps)
     - Character Bible
     - environments & visual bible
+    - target_scene_duration (default: 8.0s, selectable e.g. 8s, 9s, 10s)
 
-    Target scene duration: 5–10 seconds normally (dynamic).
+    Target scene duration: user-selected target (e.g. 8s, 9s, 10s).
     Every scene strictly maps to the lyrics/audio and includes a dedicated, production-ready video_prompt.
     """
     duration = float(audio_timeline.get("duration", 60.0))
@@ -69,8 +71,12 @@ def generate_storyboard(
 
     provider = get_ai_provider()
 
+    min_dur = max(4.0, target_scene_duration - 1.5)
+    max_dur = min(15.0, target_scene_duration + 2.0)
+
     prompt = f"""Generate a structured, synchronized 3D animation Storyboard Scene Timeline for: '{topic}'.
 Total Audio Duration: {duration:.2f} seconds.
+Target Per-Scene Duration: approximately {target_scene_duration:.1f} seconds (acceptable range {min_dur:.1f}s to {max_dur:.1f}s per scene).
 Approved Lyrics & Timestamps:
 {json.dumps(lyric_timestamps, indent=2)}
 
@@ -81,7 +87,7 @@ Environments:
 {json.dumps(environments, indent=2)}
 
 RULES:
-1. Every scene duration MUST be between 5.0 and 10.0 seconds (except possibly short intro/outro).
+1. Every scene duration MUST be approximately {target_scene_duration:.1f} seconds (between {min_dur:.1f}s and {max_dur:.1f}s).
 2. The entire timeline (start_time 0.0 to {duration:.2f}s) MUST be fully covered without overlaps or gaps.
 3. Every scene MUST map directly to the lyrics sung during that time interval.
 4. Only use character IDs from the Character Bible: {char_ids}.
@@ -158,7 +164,13 @@ Return a JSON object with a 'scenes' list of scene objects matching this strict 
         logger.warning(f"AI storyboard generation failed, using procedural builder: {e}")
 
     # Fallback procedural storyboard engine
-    return build_procedural_storyboard(duration, lyric_timestamps, characters, environments)
+    return build_procedural_storyboard(
+        duration,
+        lyric_timestamps,
+        characters,
+        environments,
+        target_scene_duration=target_scene_duration,
+    )
 
 
 def build_procedural_storyboard(
@@ -166,8 +178,9 @@ def build_procedural_storyboard(
     lyric_timestamps: List[Dict[str, Any]],
     characters: List[Dict[str, Any]],
     environments: List[Dict[str, Any]],
+    target_scene_duration: float = 8.0,
 ) -> List[Dict[str, Any]]:
-    """Procedural timeline shot generator creating 5-8s synchronized scenes with full video_prompts."""
+    """Procedural timeline shot generator creating user-targeted (e.g. 8s, 9s, 10s) synchronized scenes with full video_prompts."""
     char_obj = characters[0] if characters else {"character_id": "hero_01", "name": "Hero", "appearance": "cute toddler character with big round sparkling eyes", "clothing": "bright yellow overalls"}
     char_id = char_obj.get("character_id") or char_obj.get("id", "hero_01")
     char_name = char_obj.get("name", "Hero")
@@ -198,14 +211,24 @@ def build_procedural_storyboard(
     scene_idx = 1
 
     if lyric_timestamps:
-        # Group lyric timestamps into 5–8 second chunks
-        for idx, ts in enumerate(lyric_timestamps, start=1):
-            s_start = ts["start"]
-            s_end = ts["end"]
-            s_dur = max(4.0, s_end - s_start)
+        # Group lyric lines together to match target_scene_duration (e.g. 8s, 9s, 10s)
+        i = 0
+        n = len(lyric_timestamps)
+        while i < n:
+            chunk_start = lyric_timestamps[i]["start"]
+            chunk_lines = [lyric_timestamps[i].get("line", "")]
+            chunk_end = lyric_timestamps[i]["end"]
+            i += 1
+
+            while i < n and (chunk_end - chunk_start) < (target_scene_duration - 1.5):
+                chunk_lines.append(lyric_timestamps[i].get("line", ""))
+                chunk_end = lyric_timestamps[i]["end"]
+                i += 1
+
+            s_dur = max(4.0, chunk_end - chunk_start)
             cam = camera_presets[(scene_idx - 1) % len(camera_presets)]
             action_desc = action_presets[(scene_idx - 1) % len(action_presets)]
-            lyrics_line = ts.get("line", "")
+            lyrics_line = " ".join(l for l in chunk_lines if l.strip())
 
             video_prompt = _compose_video_prompt(
                 char_name=char_name,
@@ -221,33 +244,35 @@ def build_procedural_storyboard(
             scene = {
                 "scene_id": f"scene_{scene_idx:03d}",
                 "scene_number": scene_idx,
-                "start_time": round(s_start, 2),
+                "start_time": round(chunk_start, 2),
                 "duration": round(s_dur, 2),
-                "end_time": round(s_start + s_dur, 2),
+                "end_time": round(chunk_start + s_dur, 2),
                 "lyrics": lyrics_line,
                 "video_prompt": video_prompt,
                 "characters": [
                     {
                         "character_id": char_id,
                         "name": char_name,
-                        "action": "bounce_dance" if idx % 2 == 0 else "wave_hello",
+                        "action": "bounce_dance" if scene_idx % 2 == 0 else "wave_hello",
                     }
                 ],
-                "environment": env_obj,
+                "environment": env_name,
+                "environment_profile": env_obj,
                 "actions": [f"{char_name} {action_desc}", "camera tracks smoothly"],
                 "camera": cam,
-                "emotion": "joyful" if idx < len(lyric_timestamps) else "gentle_happy",
+                "emotion": "joyful",
                 "lighting": cam["lighting"],
                 "animation": ["dance", "bounce", "wave"],
-                "transition": "crossfade" if idx == len(lyric_timestamps) else "cut",
+                "transition": "crossfade" if i >= n else "cut",
                 "status": "PENDING",
             }
             scenes.append(scene)
-            current_time = s_start + s_dur
+            current_time = chunk_start + s_dur
             scene_idx += 1
     else:
-        # Generate generic 6-second shots covering total duration
-        target_shot_dur = 6.0
+        # Generate generic shots matching target_scene_duration (e.g. 8s, 9s, 10s)
+        target_shot_dur = float(target_scene_duration or 8.0)
+
         while current_time < total_duration:
             dur = min(target_shot_dur, total_duration - current_time)
             if dur < 2.0:
@@ -286,7 +311,8 @@ def build_procedural_storyboard(
                         "action": "bounce",
                     }
                 ],
-                "environment": env_obj,
+                "environment": env_name,
+                "environment_profile": env_obj,
                 "actions": [f"{char_name} sings along with melody"],
                 "camera": cam,
                 "emotion": "happy",

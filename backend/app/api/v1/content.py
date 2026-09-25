@@ -65,11 +65,22 @@ async def generate_project_content_package(
     )
 
     # Persist in project
-    project.title = pkg.get("title", project.title)
-    project.lyrics_text = pkg.get("lyrics_full", "")
+    raw_lyrics = pkg.get("lyrics_full", "")
+    if isinstance(raw_lyrics, dict):
+        raw_lyrics = "\n\n".join(f"[{k}]\n{v}" for k, v in raw_lyrics.items())
+    elif isinstance(raw_lyrics, list):
+        raw_lyrics = "\n".join(str(item) for item in raw_lyrics)
+    else:
+        raw_lyrics = str(raw_lyrics or "")
+
+    pkg["lyrics_full"] = raw_lyrics
+    pkg["approved_lyrics"] = raw_lyrics
+
+    project.title = str(pkg.get("title", project.title))
+    project.lyrics_text = raw_lyrics
     meta = dict(project.metadata_json or {})
     meta["content_package"] = pkg
-    meta["approved_lyrics"] = pkg.get("lyrics_full", "")
+    meta["approved_lyrics"] = raw_lyrics
     meta["visual_bible"] = pkg.get("visual_bible", {})
     project.metadata_json = meta
     await project_repo.update(project)
