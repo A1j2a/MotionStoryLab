@@ -10,7 +10,7 @@ from typing import Dict, Any, List
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
-from app.db.session import AsyncSessionLocal
+from app.db import session as db_session
 from app.models.project import Project
 from app.models.job import Job, JobStatus
 from app.models.character import Character
@@ -56,7 +56,7 @@ async def run_project_pipeline(project_id: str):
     os.makedirs(audio_dir, exist_ok=True)
     os.makedirs(scenes_dir, exist_ok=True)
 
-    async with AsyncSessionLocal() as session:
+    async with db_session.AsyncSessionLocal() as session:
         project = await session.get(Project, project_id)
         if not project:
             logger.error(f"Project {project_id} not found")
@@ -99,7 +99,7 @@ async def run_project_pipeline(project_id: str):
 
         approved_lyrics = content_pkg["lyrics_full"]
 
-        async with AsyncSessionLocal() as session:
+        async with db_session.AsyncSessionLocal() as session:
             db_project = await session.get(Project, project_id)
             db_project.title = content_pkg.get("title", db_project.title)
             db_project.lyrics_text = approved_lyrics
@@ -142,7 +142,7 @@ async def run_project_pipeline(project_id: str):
         target_duration = max(30.0, float((project.duration_min or 1) * 60.0))
         logger.info(f"[{project_id}] Stage 2: Synthesizing Song from Exact Approved Lyrics ({target_duration}s)")
 
-        async with AsyncSessionLocal() as session:
+        async with db_session.AsyncSessionLocal() as session:
             db_job = await session.get(Job, job.id)
             if db_job:
                 db_job.status = JobStatus.SONG_GENERATING
@@ -172,7 +172,7 @@ async def run_project_pipeline(project_id: str):
         mock_scenes = [{"duration": ts["end"] - ts["start"], "lyrics": ts["line"]} for ts in timeline.get("lyrics_timestamps", [])]
         await asyncio.to_thread(generate_subtitles_srt, mock_scenes, srt_path, total_duration_sec=timeline["duration"])
 
-        async with AsyncSessionLocal() as session:
+        async with db_session.AsyncSessionLocal() as session:
             db_project = await session.get(Project, project_id)
             meta = dict(db_project.metadata_json or {})
             meta["audio_timeline"] = timeline
@@ -201,7 +201,7 @@ async def run_project_pipeline(project_id: str):
             visual_bible=content_pkg.get("visual_bible", {}),
         )
 
-        async with AsyncSessionLocal() as session:
+        async with db_session.AsyncSessionLocal() as session:
             await session.execute(delete(Scene).where(Scene.project_id == project_id))
             for s in scenes_data:
                 scene_obj = Scene(
@@ -233,7 +233,7 @@ async def run_project_pipeline(project_id: str):
         # STAGE 5: INDIVIDUAL 3D SCENE RENDERING
         # ==========================================
         logger.info(f"[{project_id}] Stage 5: Rendering {len(scenes_data)} 3D Scenes Individually")
-        async with AsyncSessionLocal() as session:
+        async with db_session.AsyncSessionLocal() as session:
             db_job = await session.get(Job, job.id)
             if db_job:
                 db_job.status = JobStatus.SCENE_RENDERING
@@ -298,7 +298,7 @@ async def run_project_pipeline(project_id: str):
             if os.path.exists(scene_mp4):
                 scene_video_paths.append(scene_mp4)
 
-            async with AsyncSessionLocal() as session:
+            async with db_session.AsyncSessionLocal() as session:
                 stmt = select(Scene).where(Scene.project_id == project_id, Scene.scene_number == idx)
                 res = await session.execute(stmt)
                 db_sc = res.scalars().first()
@@ -316,7 +316,7 @@ async def run_project_pipeline(project_id: str):
         # STAGE 6: MULTI-TRACK COMPOSITING (FFmpeg)
         # ==========================================
         logger.info(f"[{project_id}] Stage 6: Compositing Final Video with Exact Song & Subtitles")
-        async with AsyncSessionLocal() as session:
+        async with db_session.AsyncSessionLocal() as session:
             db_job = await session.get(Job, job.id)
             if db_job:
                 db_job.status = JobStatus.ASSEMBLING
@@ -359,7 +359,7 @@ async def run_project_pipeline(project_id: str):
             characters=char_list,
         )
 
-        async with AsyncSessionLocal() as session:
+        async with db_session.AsyncSessionLocal() as session:
             session.add(Asset(project_id=project_id, asset_type="final_video", file_path=final_video_path))
             session.add(Asset(project_id=project_id, asset_type="thumbnail", file_path=thumbnail_path))
 
@@ -382,7 +382,7 @@ async def run_project_pipeline(project_id: str):
 
     except Exception as e:
         logger.exception(f"[{project_id}] Pipeline execution failed: {e}")
-        async with AsyncSessionLocal() as session:
+        async with db_session.AsyncSessionLocal() as session:
             db_job = await session.get(Job, job.id)
             if db_job:
                 db_job.status = JobStatus.FAILED

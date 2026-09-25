@@ -25,14 +25,14 @@ router = APIRouter(prefix="/projects", tags=["audio-flow"])
 
 async def run_song_generation_task(project_id: str):
     """Background task generating song from exact approved lyrics and running audio analysis."""
-    from app.db.session import AsyncSessionLocal
+    from app.db import session as db_session
 
     project_dir = os.path.join(str(settings.resolved_project_dir), project_id)
     audio_dir = os.path.join(project_dir, "audio")
     os.makedirs(audio_dir, exist_ok=True)
     master_song_path = os.path.join(audio_dir, "master_soundtrack.wav")
 
-    async with AsyncSessionLocal() as session:
+    async with db_session.AsyncSessionLocal() as session:
         project_repo = ProjectRepository(session)
         job_repo = JobRepository(session)
 

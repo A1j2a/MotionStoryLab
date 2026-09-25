@@ -163,13 +163,13 @@ async def validate_project_storyboard(
 
 async def render_all_scenes_task(project_id: str):
     """Renders 3D scenes individually and merges into final MP4."""
-    from app.db.session import AsyncSessionLocal
+    from app.db import session as db_session
 
     project_dir = os.path.join(str(settings.resolved_project_dir), project_id)
     scenes_dir = os.path.join(project_dir, "scenes")
     os.makedirs(scenes_dir, exist_ok=True)
 
-    async with AsyncSessionLocal() as session:
+    async with db_session.AsyncSessionLocal() as session:
         project_repo = ProjectRepository(session)
         job_repo = JobRepository(session)
 
@@ -245,7 +245,7 @@ async def render_all_scenes_task(project_id: str):
         if os.path.exists(scene_mp4):
             scene_video_paths.append(scene_mp4)
 
-        async with AsyncSessionLocal() as session:
+        async with db_session.AsyncSessionLocal() as session:
             stmt = select(Scene).where(Scene.project_id == project_id, Scene.scene_number == idx)
             res = await session.execute(stmt)
             db_sc = res.scalars().first()
@@ -266,7 +266,7 @@ async def render_all_scenes_task(project_id: str):
 
 async def assemble_final_video_task(project_id: str):
     """Step 16: Multi-track FFmpeg assembly of scenes + exact song + subtitles."""
-    from app.db.session import AsyncSessionLocal
+    from app.db import session as db_session
 
     project_dir = os.path.join(str(settings.resolved_project_dir), project_id)
     scenes_dir = os.path.join(project_dir, "scenes")
@@ -286,7 +286,7 @@ async def assemble_final_video_task(project_id: str):
     final_video = os.path.join(project_dir, "final.mp4")
     thumbnail_path = os.path.join(project_dir, "thumbnail.jpg")
 
-    async with AsyncSessionLocal() as session:
+    async with db_session.AsyncSessionLocal() as session:
         j_res = await session.execute(select(Job).where(Job.project_id == project_id).order_by(Job.created_at.desc()))
         db_j = j_res.scalars().first()
         if db_j:
@@ -297,7 +297,7 @@ async def assemble_final_video_task(project_id: str):
 
     proj_title = "Preschool Fun"
     proj_topic = "Kids Song"
-    async with AsyncSessionLocal() as session:
+    async with db_session.AsyncSessionLocal() as session:
         p_fetch = await session.execute(select(Project).where(Project.id == project_id))
         p_found = p_fetch.scalars().first()
         if p_found:
@@ -314,7 +314,7 @@ async def assemble_final_video_task(project_id: str):
         video_path=final_video,
     )
 
-    async with AsyncSessionLocal() as session:
+    async with db_session.AsyncSessionLocal() as session:
         session.add(Asset(project_id=project_id, asset_type="final_video", file_path=final_video))
         session.add(Asset(project_id=project_id, asset_type="thumbnail", file_path=thumbnail_path))
 

@@ -37,13 +37,14 @@ export function QCCheckView({ qcResult, onRerunQC, loading }: QCCheckViewProps) 
     );
   }
 
+  const checks = qcResult?.checks || ({} as any);
   const items = [
-    { label: "Video Integrity (MP4 1080p)", ok: qcResult.checks.video, icon: Film },
-    { label: "Master Soundtrack & Vocals", ok: qcResult.checks.audio, icon: Music },
-    { label: "Rendered 3D Scene Shots", ok: qcResult.checks.scenes, icon: Clapperboard },
-    { label: "Approved Lyrics Consistency", ok: qcResult.checks.lyrics, icon: FileText },
-    { label: "Character Bible Consistency", ok: qcResult.checks.characters, icon: Users2 },
-    { label: "Synchronized SRT Subtitles", ok: qcResult.checks.subtitles, icon: Subtitles },
+    { label: "Video Integrity (MP4 1080p)", ok: !!checks.video, icon: Film },
+    { label: "Master Soundtrack & Vocals", ok: !!checks.audio, icon: Music },
+    { label: "Rendered 3D Scene Shots", ok: !!checks.scenes, icon: Clapperboard },
+    { label: "Approved Lyrics Consistency", ok: !!checks.lyrics, icon: FileText },
+    { label: "Character Bible Consistency", ok: !!checks.characters, icon: Users2 },
+    { label: "Synchronized SRT Subtitles", ok: !!checks.subtitles, icon: Subtitles },
   ];
 
   return (

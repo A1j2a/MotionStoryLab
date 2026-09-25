@@ -5,6 +5,22 @@
 
 set -euo pipefail
 
+# Ensure standard binary paths are in PATH (Homebrew, NVM, FNM, Volta)
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:$PATH"
+if [ -d "$HOME/.nvm/versions/node" ]; then
+    for NVM_NODE_DIR in "$HOME"/.nvm/versions/node/*; do
+        if [ -d "${NVM_NODE_DIR}/bin" ]; then
+            export PATH="${NVM_NODE_DIR}/bin:$PATH"
+        fi
+    done
+fi
+if [ -d "$HOME/.fnm/current/bin" ]; then
+    export PATH="$HOME/.fnm/current/bin:$PATH"
+fi
+if [ -d "$HOME/.volta/bin" ]; then
+    export PATH="$HOME/.volta/bin:$PATH"
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "${SCRIPT_DIR}"
 
@@ -46,8 +62,19 @@ fi
 
 # 2. Virtual environment check & activation
 PYTHON_BIN="python3"
+if [ ! -d "${SCRIPT_DIR}/backend/.venv" ]; then
+    echo "Creating backend virtual environment..."
+    PYTHON_CMD="python3"
+    if command -v /opt/homebrew/bin/python3.13 >/dev/null 2>&1; then
+        PYTHON_CMD="/opt/homebrew/bin/python3.13"
+    fi
+    "${PYTHON_CMD}" -m venv "${SCRIPT_DIR}/backend/.venv"
+    "${SCRIPT_DIR}/backend/.venv/bin/pip" install --upgrade pip --quiet
+    "${SCRIPT_DIR}/backend/.venv/bin/pip" install -r "${SCRIPT_DIR}/backend/requirements.txt" --quiet
+    echo "  ✓ Virtual environment created & packages installed"
+fi
+
 if [ -d "${SCRIPT_DIR}/backend/.venv" ]; then
-    echo "Activating virtual environment: backend/.venv"
     # shellcheck disable=SC1091
     source "${SCRIPT_DIR}/backend/.venv/bin/activate"
     if [ -f "${SCRIPT_DIR}/backend/.venv/bin/python3" ]; then
@@ -119,12 +146,29 @@ fi
 echo "[7/8] Checking Next.js Frontend (Port ${FRONTEND_PORT:-3000})..."
 FRONTEND_PORT="${FRONTEND_PORT:-3000}"
 if [ -f "${SCRIPT_DIR}/frontend/package.json" ]; then
+    if [ ! -d "${SCRIPT_DIR}/frontend/node_modules" ]; then
+        echo "  Installing frontend packages..."
+        (cd "${SCRIPT_DIR}/frontend" && npm install --silent)
+    fi
+
+    if [ ! -d "${SCRIPT_DIR}/frontend/.next" ]; then
+        echo "  Building Next.js frontend..."
+        (cd "${SCRIPT_DIR}/frontend" && npm run build --silent)
+    fi
+
     if lsof -Pi :${FRONTEND_PORT} -sTCP:LISTEN -t >/dev/null 2>&1; then
         echo "  ✓ Frontend already running on port ${FRONTEND_PORT}"
     else
-        echo "  Starting Next.js Frontend..."
-        (cd "${SCRIPT_DIR}/frontend" && nohup ./node_modules/.bin/next start -p "${FRONTEND_PORT}" > "${SCRIPT_DIR}/logs/frontend.log" 2>&1 & echo $! > "${PID_DIR}/frontend.pid")
-        echo "  ✓ Frontend started"
+        # npm run dev or npm start mode
+        ORIG_DIR="$(pwd)"
+        cd "${SCRIPT_DIR}/frontend"
+        nohup ./node_modules/.bin/next start -H 127.0.0.1 -p "${FRONTEND_PORT}" > "${SCRIPT_DIR}/logs/frontend.log" 2>&1 &
+        FRONTEND_PID=$!
+        disown ${FRONTEND_PID} 2>/dev/null || true
+        echo ${FRONTEND_PID} > "${PID_DIR}/frontend.pid"
+        cd "${ORIG_DIR}"
+        sleep 2
+        echo "  ✓ Frontend started (PID: ${FRONTEND_PID})"
     fi
 fi
 
