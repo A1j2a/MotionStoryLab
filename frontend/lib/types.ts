@@ -358,6 +358,28 @@ export interface AISettings {
 
   // Audio & Suno Mode Settings
   auto_song_generation_enabled: boolean;
+
+  // Brand Logo & Compositing Settings
+  channel_logo_url?: string | null;
+  channel_logo_enabled?: boolean;
+  channel_logo_position?: string;
+  channel_logo_opacity?: number;
+  channel_logo_scale?: number;
+  channel_logo_bottom_spacing?: number;
+
+  // Intro & Outro Video Settings
+  intro_clip_url?: string | null;
+  intro_enabled?: boolean;
+  intro_duration?: number | null;
+  outro_clip_url?: string | null;
+  outro_enabled?: boolean;
+  outro_duration?: number | null;
+
+  // Multi-track Audio Mixing Settings
+  scene_audio_volume?: number;
+  song_audio_volume?: number;
+  burn_subtitles?: boolean;
+  subtitle_font_size?: number;
 }
 
 export interface TestVideoResult {
@@ -395,6 +417,36 @@ export interface ServiceToolItem {
   log_file: string;
   description: string;
   can_toggle: boolean;
+}
+
+export interface AssemblyReadiness {
+  ready: boolean;
+  total_scenes: number;
+  uploaded_scenes: number;
+  missing_scenes: number[];
+  audio_available: boolean;
+  audio_file?: string | null;
+  srt_available: boolean;
+  sequence_confirmed: boolean;
+  topic?: string;
+  title?: string;
+  final_video_exists?: boolean;
+  final_video_url?: string | null;
+  final_video_duration?: number;
+  thumbnail_url?: string | null;
+  thumbnail_prompt?: string | null;
+  unresolved_count?: number;
+  scene_details?: Array<{
+    scene_id: string;
+    scene_number: number;
+    has_video: boolean;
+    filename?: string | null;
+    file_path?: string | null;
+    duration: number;
+    uploaded_duration?: number | null;
+    file_size?: number | null;
+    prompt_status: string;
+  }>;
 }
 
 export interface SunoPromptPackage {

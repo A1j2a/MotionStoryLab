@@ -132,6 +132,27 @@ class ExistingImageProvider(ImageGenerationProvider):
         )
 
 
+def _get_db_config(key: str) -> str:
+    """Reads configuration key from studio.db studio_config table."""
+    try:
+        import sqlite3
+        from pathlib import Path
+        db_path = Path(__file__).resolve().parent.parent / "projects" / "studio.db"
+        if db_path.exists():
+            conn = sqlite3.connect(str(db_path), timeout=5)
+            c = conn.cursor()
+            c.execute("SELECT value FROM studio_config WHERE key = ?", (key,))
+            row = c.fetchone()
+            conn.close()
+            if row and row[0]:
+                val = row[0].strip()
+                if "..." not in val and len(val) > 15:
+                    return val
+    except Exception:
+        pass
+    return ""
+
+
 class NewAIImageProvider(ImageGenerationProvider):
     """
     Fal.ai Cloud AI Image Provider (fal-ai/flux/dev, fal-ai/recraft-v3, or fal-ai/flux-pro).
@@ -140,7 +161,12 @@ class NewAIImageProvider(ImageGenerationProvider):
     """
 
     def __init__(self, api_key: Optional[str] = None, model: str = "fal-ai/flux/dev"):
-        self.api_key = (api_key or os.environ.get("FAL_KEY", "")).strip()
+        db_key = _get_db_config("FAL_KEY")
+        resolved = (api_key or db_key or os.environ.get("FAL_KEY", "")).strip()
+        # Ignore masked string placeholders like 'e080bf...b844'
+        if "..." in resolved or len(resolved) < 15:
+            resolved = ""
+        self.api_key = resolved
         self.model = model or "fal-ai/flux/dev"
         self._fallback = ExistingImageProvider()
 

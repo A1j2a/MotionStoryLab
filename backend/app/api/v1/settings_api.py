@@ -1,22 +1,27 @@
 import os
 import re
 import time
+import shutil
 import sqlite3
 import logging
+import subprocess
 from pathlib import Path
 from typing import Optional, List
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from app.core.config import settings, BASE_DIR
 from ai.providers import OpenRouterProvider, OpenRouterImageProvider, get_ai_provider
-from renderer.compositor import generate_high_ctr_thumbnail
+from renderer.compositor import generate_high_ctr_thumbnail, get_ffprobe_path, get_video_duration
 
 logger = logging.getLogger("studio.api.settings")
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
 DB_PATH = BASE_DIR / "projects" / "studio.db"
+ASSETS_DIR = BASE_DIR / "projects" / "assets"
+ASSETS_DIR.mkdir(parents=True, exist_ok=True)
 
 AVAILABLE_MODELS = [
     {"id": "openrouter/free", "name": "OpenRouter Free Auto-Router (100% Free - Works with all Free Keys)", "is_free": True},
@@ -80,6 +85,28 @@ class AISettingsResponse(BaseModel):
     # Audio & Suno Mode Settings
     auto_song_generation_enabled: bool = True
 
+    # Brand Logo & Compositing Settings
+    channel_logo_url: Optional[str] = None
+    channel_logo_enabled: bool = True
+    channel_logo_position: str = "bottom_right"
+    channel_logo_opacity: float = 0.95
+    channel_logo_scale: int = 180
+    channel_logo_bottom_spacing: int = 24
+
+    # Intro & Outro Video Settings
+    intro_clip_url: Optional[str] = None
+    intro_enabled: bool = True
+    intro_duration: Optional[float] = None
+    outro_clip_url: Optional[str] = None
+    outro_enabled: bool = True
+    outro_duration: Optional[float] = None
+
+    # Multi-track Audio Mixing Settings
+    scene_audio_volume: float = 0.70
+    song_audio_volume: float = 1.00
+    burn_subtitles: bool = True
+    subtitle_font_size: int = 24
+
 
 class UpdateAISettingsRequest(BaseModel):
     openrouter_enabled: bool
@@ -106,6 +133,23 @@ class UpdateAISettingsRequest(BaseModel):
     thumbnail_model: Optional[str] = "high_ctr_graphic"
     thumbnail_aspect_ratio: Optional[str] = "16:9"
     auto_song_generation_enabled: Optional[bool] = True
+
+    # Brand Logo & Compositing Settings
+    channel_logo_enabled: Optional[bool] = True
+    channel_logo_position: Optional[str] = "bottom_right"
+    channel_logo_opacity: Optional[float] = 0.95
+    channel_logo_scale: Optional[int] = 180
+    channel_logo_bottom_spacing: Optional[int] = 24
+
+    # Intro & Outro Video Settings
+    intro_enabled: Optional[bool] = True
+    outro_enabled: Optional[bool] = True
+
+    # Audio Mixing Settings
+    scene_audio_volume: Optional[float] = 0.70
+    song_audio_volume: Optional[float] = 1.00
+    burn_subtitles: Optional[bool] = True
+    subtitle_font_size: Optional[int] = 24
 
 
 
@@ -249,6 +293,32 @@ async def get_ai_settings():
     provider_instance = get_ai_provider()
     active_provider_name = provider_instance.__class__.__name__
 
+    # Brand Logo & Compositing settings
+    logo_file = ASSETS_DIR / "channel_logo.png"
+    logo_url = "/api/v1/settings/logo" if logo_file.exists() else None
+    logo_enabled = get_db_config("CHANNEL_LOGO_ENABLED", "true").lower() in ("true", "1", "yes")
+    logo_pos = get_db_config("CHANNEL_LOGO_POSITION", "bottom_right")
+    logo_opacity = float(get_db_config("CHANNEL_LOGO_OPACITY", "0.95"))
+    logo_scale = int(get_db_config("CHANNEL_LOGO_SCALE", "180"))
+    logo_bottom_spacing = int(get_db_config("CHANNEL_LOGO_BOTTOM_SPACING", "24"))
+
+    # Intro & Outro settings
+    intro_file = ASSETS_DIR / "intro_clip.mp4"
+    intro_url = "/api/v1/settings/intro" if intro_file.exists() else None
+    intro_enabled = get_db_config("INTRO_ENABLED", "true").lower() in ("true", "1", "yes")
+    intro_dur = get_video_duration(str(intro_file)) if intro_file.exists() else None
+
+    outro_file = ASSETS_DIR / "outro_clip.mp4"
+    outro_url = "/api/v1/settings/outro" if outro_file.exists() else None
+    outro_enabled = get_db_config("OUTRO_ENABLED", "true").lower() in ("true", "1", "yes")
+    outro_dur = get_video_duration(str(outro_file)) if outro_file.exists() else None
+
+    # Audio Mixing Settings
+    scene_vol = float(get_db_config("SCENE_AUDIO_VOLUME", "0.70"))
+    song_vol = float(get_db_config("SONG_AUDIO_VOLUME", "1.00"))
+    burn_subs = get_db_config("BURN_SUBTITLES", "true").lower() in ("true", "1", "yes")
+    sub_size = int(get_db_config("SUBTITLE_FONT_SIZE", "24"))
+
     return AISettingsResponse(
         openrouter_enabled=enabled,
         openrouter_api_key=current_key,
@@ -274,6 +344,22 @@ async def get_ai_settings():
         thumbnail_aspect_ratio=thumb_ratio,
         available_thumbnail_models=AVAILABLE_THUMBNAIL_MODELS,
         auto_song_generation_enabled=auto_song_enabled,
+        channel_logo_url=logo_url,
+        channel_logo_enabled=logo_enabled,
+        channel_logo_position=logo_pos,
+        channel_logo_opacity=logo_opacity,
+        channel_logo_scale=logo_scale,
+        channel_logo_bottom_spacing=logo_bottom_spacing,
+        intro_clip_url=intro_url,
+        intro_enabled=intro_enabled,
+        intro_duration=intro_dur,
+        outro_clip_url=outro_url,
+        outro_enabled=outro_enabled,
+        outro_duration=outro_dur,
+        scene_audio_volume=scene_vol,
+        song_audio_volume=song_vol,
+        burn_subtitles=burn_subs,
+        subtitle_font_size=sub_size,
     )
 
 
@@ -299,6 +385,17 @@ async def update_ai_settings(payload: UpdateAISettingsRequest):
         "THUMBNAIL_MODEL": payload.thumbnail_model or "high_ctr_graphic",
         "THUMBNAIL_ASPECT_RATIO": payload.thumbnail_aspect_ratio or "16:9",
         "AUTO_SONG_GENERATION_ENABLED": "true" if payload.auto_song_generation_enabled is not False else "false",
+        "CHANNEL_LOGO_ENABLED": "true" if payload.channel_logo_enabled is not False else "false",
+        "CHANNEL_LOGO_POSITION": payload.channel_logo_position or "bottom_right",
+        "CHANNEL_LOGO_OPACITY": str(payload.channel_logo_opacity if payload.channel_logo_opacity is not None else 0.95),
+        "CHANNEL_LOGO_SCALE": str(payload.channel_logo_scale if payload.channel_logo_scale is not None else 180),
+        "CHANNEL_LOGO_BOTTOM_SPACING": str(payload.channel_logo_bottom_spacing if payload.channel_logo_bottom_spacing is not None else 24),
+        "INTRO_ENABLED": "true" if payload.intro_enabled is not False else "false",
+        "OUTRO_ENABLED": "true" if payload.outro_enabled is not False else "false",
+        "SCENE_AUDIO_VOLUME": str(payload.scene_audio_volume if payload.scene_audio_volume is not None else 0.70),
+        "SONG_AUDIO_VOLUME": str(payload.song_audio_volume if payload.song_audio_volume is not None else 1.00),
+        "BURN_SUBTITLES": "true" if payload.burn_subtitles is not False else "false",
+        "SUBTITLE_FONT_SIZE": str(payload.subtitle_font_size if payload.subtitle_font_size is not None else 24),
     }
 
     if payload.fal_key and not payload.fal_key.startswith("***"):
@@ -330,6 +427,10 @@ async def update_ai_settings(payload: UpdateAISettingsRequest):
     current_fal_key = get_db_config("FAL_KEY", os.environ.get("FAL_KEY", ""))
     provider_instance = get_ai_provider()
 
+    logo_file = ASSETS_DIR / "channel_logo.png"
+    intro_file = ASSETS_DIR / "intro_clip.mp4"
+    outro_file = ASSETS_DIR / "outro_clip.mp4"
+
     return AISettingsResponse(
         openrouter_enabled=payload.openrouter_enabled,
         openrouter_api_key=current_key,
@@ -355,7 +456,169 @@ async def update_ai_settings(payload: UpdateAISettingsRequest):
         thumbnail_aspect_ratio=payload.thumbnail_aspect_ratio or "16:9",
         available_thumbnail_models=AVAILABLE_THUMBNAIL_MODELS,
         auto_song_generation_enabled=payload.auto_song_generation_enabled if payload.auto_song_generation_enabled is not None else True,
+        channel_logo_url="/api/v1/settings/logo" if logo_file.exists() else None,
+        channel_logo_enabled=payload.channel_logo_enabled if payload.channel_logo_enabled is not None else True,
+        channel_logo_position=payload.channel_logo_position or "bottom_right",
+        channel_logo_opacity=payload.channel_logo_opacity if payload.channel_logo_opacity is not None else 0.95,
+        channel_logo_scale=payload.channel_logo_scale if payload.channel_logo_scale is not None else 180,
+        channel_logo_bottom_spacing=payload.channel_logo_bottom_spacing if payload.channel_logo_bottom_spacing is not None else 24,
+        intro_clip_url="/api/v1/settings/intro" if intro_file.exists() else None,
+        intro_enabled=payload.intro_enabled if payload.intro_enabled is not None else True,
+        intro_duration=get_video_duration(str(intro_file)) if intro_file.exists() else None,
+        outro_clip_url="/api/v1/settings/outro" if outro_file.exists() else None,
+        outro_enabled=payload.outro_enabled if payload.outro_enabled is not None else True,
+        outro_duration=get_video_duration(str(outro_file)) if outro_file.exists() else None,
+        scene_audio_volume=payload.scene_audio_volume if payload.scene_audio_volume is not None else 0.70,
+        song_audio_volume=payload.song_audio_volume if payload.song_audio_volume is not None else 1.00,
+        burn_subtitles=payload.burn_subtitles if payload.burn_subtitles is not False else False,
+        subtitle_font_size=payload.subtitle_font_size or 24,
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Channel Logo & Intro/Outro Asset Management
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.post("/logo/upload")
+async def upload_channel_logo(file: UploadFile = File(...)):
+    """Upload channel watermark logo (PNG / WEBP / JPG) to be overlaid on videos."""
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in [".png", ".webp", ".jpg", ".jpeg"]:
+        raise HTTPException(status_code=400, detail="Invalid image format. Please upload PNG, WEBP, or JPG.")
+
+    dest = ASSETS_DIR / "channel_logo.png"
+    content = await file.read()
+    dest.write_bytes(content)
+
+    set_db_config("CHANNEL_LOGO_PATH", str(dest))
+    set_db_config("CHANNEL_LOGO_ENABLED", "true")
+
+    return {
+        "status": "success",
+        "message": "Channel watermark logo uploaded successfully!",
+        "logo_url": "/api/v1/settings/logo",
+        "file_size": len(content),
+    }
+
+
+@router.get("/logo")
+async def get_channel_logo():
+    """Serve the active channel watermark logo."""
+    dest = ASSETS_DIR / "channel_logo.png"
+    if not dest.exists():
+        raise HTTPException(status_code=404, detail="No channel logo uploaded yet")
+    return FileResponse(str(dest), media_type="image/png", filename="channel_logo.png")
+
+
+@router.delete("/logo")
+async def delete_channel_logo():
+    """Delete the channel watermark logo."""
+    dest = ASSETS_DIR / "channel_logo.png"
+    if dest.exists():
+        dest.unlink()
+    set_db_config("CHANNEL_LOGO_PATH", "")
+    set_db_config("CHANNEL_LOGO_ENABLED", "false")
+    return {"status": "success", "message": "Channel logo removed"}
+
+
+@router.post("/intro/upload")
+async def upload_intro_clip(file: UploadFile = File(...)):
+    """Upload default channel intro video clip (MP4 / MOV). Plays before scenes with its own audio."""
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in [".mp4", ".mov", ".webm"]:
+        raise HTTPException(status_code=400, detail="Invalid video format. Please upload MP4, MOV, or WEBM.")
+
+    dest = ASSETS_DIR / f"intro_clip{ext}"
+    dest_final = ASSETS_DIR / "intro_clip.mp4"
+    content = await file.read()
+    dest.write_bytes(content)
+
+    if ext != ".mp4":
+        ffmpeg_bin = shutil.which("ffmpeg") or "/opt/homebrew/bin/ffmpeg" or "ffmpeg"
+        subprocess.run([ffmpeg_bin, "-y", "-i", str(dest), "-c:v", "libx264", "-c:a", "aac", str(dest_final)], check=True)
+    else:
+        dest_final = dest
+
+    duration = get_video_duration(str(dest_final))
+    set_db_config("INTRO_CLIP_PATH", str(dest_final))
+    set_db_config("INTRO_ENABLED", "true")
+
+    return {
+        "status": "success",
+        "message": "Intro clip uploaded successfully!",
+        "intro_url": "/api/v1/settings/intro",
+        "duration": duration,
+    }
+
+
+@router.get("/intro")
+async def get_intro_clip():
+    """Serve the active channel intro clip."""
+    dest = ASSETS_DIR / "intro_clip.mp4"
+    if not dest.exists():
+        raise HTTPException(status_code=404, detail="No intro clip uploaded yet")
+    return FileResponse(str(dest), media_type="video/mp4", filename="intro_clip.mp4")
+
+
+@router.delete("/intro")
+async def delete_intro_clip():
+    """Delete the channel intro clip."""
+    dest = ASSETS_DIR / "intro_clip.mp4"
+    if dest.exists():
+        dest.unlink()
+    set_db_config("INTRO_CLIP_PATH", "")
+    set_db_config("INTRO_ENABLED", "false")
+    return {"status": "success", "message": "Intro clip removed"}
+
+
+@router.post("/outro/upload")
+async def upload_outro_clip(file: UploadFile = File(...)):
+    """Upload default channel outro / end-screen video clip (MP4 / MOV). Plays after scenes with its own audio."""
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in [".mp4", ".mov", ".webm"]:
+        raise HTTPException(status_code=400, detail="Invalid video format. Please upload MP4, MOV, or WEBM.")
+
+    dest = ASSETS_DIR / f"outro_clip{ext}"
+    dest_final = ASSETS_DIR / "outro_clip.mp4"
+    content = await file.read()
+    dest.write_bytes(content)
+
+    if ext != ".mp4":
+        ffmpeg_bin = shutil.which("ffmpeg") or "/opt/homebrew/bin/ffmpeg" or "ffmpeg"
+        subprocess.run([ffmpeg_bin, "-y", "-i", str(dest), "-c:v", "libx264", "-c:a", "aac", str(dest_final)], check=True)
+    else:
+        dest_final = dest
+
+    duration = get_video_duration(str(dest_final))
+    set_db_config("OUTRO_CLIP_PATH", str(dest_final))
+    set_db_config("OUTRO_ENABLED", "true")
+
+    return {
+        "status": "success",
+        "message": "Outro clip uploaded successfully!",
+        "outro_url": "/api/v1/settings/outro",
+        "duration": duration,
+    }
+
+
+@router.get("/outro")
+async def get_outro_clip():
+    """Serve the active channel outro clip."""
+    dest = ASSETS_DIR / "outro_clip.mp4"
+    if not dest.exists():
+        raise HTTPException(status_code=404, detail="No outro clip uploaded yet")
+    return FileResponse(str(dest), media_type="video/mp4", filename="outro_clip.mp4")
+
+
+@router.delete("/outro")
+async def delete_outro_clip():
+    """Delete the channel outro clip."""
+    dest = ASSETS_DIR / "outro_clip.mp4"
+    if dest.exists():
+        dest.unlink()
+    set_db_config("OUTRO_CLIP_PATH", "")
+    set_db_config("OUTRO_ENABLED", "false")
+    return {"status": "success", "message": "Outro clip removed"}
 
 
 @router.post("/ai/test")

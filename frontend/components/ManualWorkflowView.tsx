@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import Link from "next/link";
 import { api, API_BASE } from "@/lib/api";
 import { Project, Scene, AudioTimeline } from "@/lib/types";
 import {
@@ -30,7 +31,11 @@ import {
   Hash,
   FileText,
   AlignLeft,
+  ImageIcon,
+  Upload,
+  Activity,
 } from "lucide-react";
+import { InteractiveEngineFlow } from "@/components/InteractiveEngineFlow";
 
 interface ManualWorkflowViewProps {
   initialProjectId?: string;
@@ -52,6 +57,7 @@ interface SeoPackage {
   description: string;
   tags: string;
   caption: string;
+  thumbnail_prompt?: string;
 }
 
 interface UploadResult {
@@ -67,6 +73,10 @@ interface UnresolvedFile {
   filename: string;
   tmp_path: string;
   duration?: number;
+  suggested_scene_number?: number;
+  confidence?: number;
+  match_reason?: string;
+  match_source?: string;
 }
 
 interface AssemblyReadiness {
@@ -77,6 +87,7 @@ interface AssemblyReadiness {
   audio_available: boolean;
   srt_available: boolean;
   sequence_confirmed: boolean;
+  thumbnail_prompt?: string | null;
 }
 
 export function ManualWorkflowView({ initialProjectId, onProjectChange }: ManualWorkflowViewProps) {
@@ -90,10 +101,16 @@ export function ManualWorkflowView({ initialProjectId, onProjectChange }: Manual
   const [loadingAiTopics, setLoadingAiTopics] = useState<boolean>(false);
   const [creatingProject, setCreatingProject] = useState<boolean>(false);
 
-  // Step 2: SEO Content
+  // Step 2: SEO & High-CTR Thumbnail
   const [seoPkg, setSeoPkg] = useState<SeoPackage | null>(null);
   const [loadingSeo, setLoadingSeo] = useState<boolean>(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [generatingThumb, setGeneratingThumb] = useState<boolean>(false);
+  const [thumbTimestamp, setThumbTimestamp] = useState<number>(Date.now());
+  const [thumbError, setThumbError] = useState<string | null>(null);
+  const [thumbPrompt, setThumbPrompt] = useState<string>("");
+  const [copiedThumbPrompt, setCopiedThumbPrompt] = useState<boolean>(false);
+  const [showEngineFlow, setShowEngineFlow] = useState<boolean>(false);
 
   // Step 3 & 4: Audio & SRT
   const [audioTimeline, setAudioTimeline] = useState<AudioTimeline | null>(null);
@@ -120,6 +137,9 @@ export function ManualWorkflowView({ initialProjectId, onProjectChange }: Manual
   const [unresolved, setUnresolved] = useState<UnresolvedFile[]>([]);
   const [assigningFile, setAssigningFile] = useState<UnresolvedFile | null>(null);
   const [assignTargetScene, setAssignTargetScene] = useState<number>(1);
+  const [fileSceneMap, setFileSceneMap] = useState<Record<string, number>>({});
+  const [aiMatching, setAiMatching] = useState<boolean>(false);
+  const [autoAssigning, setAutoAssigning] = useState<boolean>(false);
   const videoFileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Step 13-14: Sequence Confirmation
@@ -139,14 +159,22 @@ export function ManualWorkflowView({ initialProjectId, onProjectChange }: Manual
     try {
       const list = await api.getProjects();
       setProjects(list || []);
-      if (!selectedProjectId && list && list.length > 0) {
-        setSelectedProjectId(list[0].id);
-        if (onProjectChange) onProjectChange(list[0].id);
+      const savedId = typeof window !== "undefined" ? localStorage.getItem("motionstory_active_project_id") : null;
+      let targetId = initialProjectId || selectedProjectId;
+      if (!targetId && savedId && list.some((p) => p.id === savedId)) {
+        targetId = savedId;
+      }
+      if (!targetId && list && list.length > 0) {
+        targetId = list[0].id;
+      }
+      if (targetId && targetId !== selectedProjectId) {
+        setSelectedProjectId(targetId);
+        if (onProjectChange) onProjectChange(targetId);
       }
     } catch (e) {
       console.error("Failed to load projects:", e);
     }
-  }, [selectedProjectId, onProjectChange]);
+  }, [selectedProjectId, initialProjectId, onProjectChange]);
 
   useEffect(() => {
     loadProjects();
@@ -155,20 +183,27 @@ export function ManualWorkflowView({ initialProjectId, onProjectChange }: Manual
   // Load project-specific data whenever selectedProjectId changes
   const loadProjectData = useCallback(async (projId: string) => {
     if (!projId) return;
+    if (typeof window !== "undefined") {
+      localStorage.setItem("motionstory_active_project_id", projId);
+    }
     try {
       const proj = await api.getProject(projId);
       setActiveProject(proj);
       if (proj.topic) setTopicInput(proj.topic);
 
-      // Load SEO, Audio timeline, Scenes, Copy Status in parallel
-      const [seoData, timeline, scenesList, statusData] = await Promise.all([
+      // Load SEO, Audio timeline, Scenes, Copy Status, and Assembly Readiness in parallel
+      const [seoData, timeline, scenesList, statusData, readyData] = await Promise.all([
         api.getManualSeo(projId).catch(() => null),
         api.getAudioTimeline(projId).catch(() => null),
         api.getScenes(projId).catch(() => []),
         api.getCopyStatus(projId).catch(() => null),
+        api.checkAssemblyReadiness(projId).catch(() => null),
       ]);
 
-      if (seoData) setSeoPkg(seoData);
+      if (seoData) {
+        setSeoPkg(seoData);
+        if (seoData.thumbnail_prompt) setThumbPrompt(seoData.thumbnail_prompt);
+      }
       if (timeline) setAudioTimeline(timeline);
       if (scenesList) {
         const typedScenes = scenesList as SceneWithStatus[];
@@ -178,6 +213,52 @@ export function ManualWorkflowView({ initialProjectId, onProjectChange }: Manual
         setSequenceConfirmed(allConfirmed);
       }
       if (statusData) setCopyStatus(statusData);
+
+      if (readyData) {
+        setReadiness(readyData);
+        if (readyData.thumbnail_prompt) {
+          setThumbPrompt(readyData.thumbnail_prompt);
+        } else if (projId) {
+          api.getThumbnailPrompt(projId).then((tp) => {
+            if (tp?.prompt) setThumbPrompt(tp.prompt);
+          }).catch(() => null);
+        }
+        // If final assembled video already exists on disk, restore the player and download state immediately
+        if (readyData.final_video_exists) {
+          setFinalVideoResult({
+            status: "completed",
+            final_video: readyData.final_video_url || `${API_BASE}/api/v1/projects/${projId}/assembly/final-video`,
+            duration: readyData.final_video_duration || 0,
+          });
+        } else {
+          setFinalVideoResult(null);
+        }
+
+        // If there are unresolved clips waiting in project folder, auto-fetch AI matches
+        if (readyData.unresolved_count && readyData.unresolved_count > 0) {
+          api.aiMatchVideos(projId).then((matchRes) => {
+            if (matchRes.matches && matchRes.matches.length > 0) {
+              setUnresolved(
+                matchRes.matches.map((m) => ({
+                  filename: m.filename,
+                  tmp_path: m.tmp_path,
+                  suggested_scene_number: m.suggested_scene_number,
+                  confidence: m.confidence,
+                  match_reason: m.match_reason,
+                  match_source: m.match_source,
+                }))
+              );
+              const newMap: Record<string, number> = {};
+              matchRes.matches.forEach((m) => {
+                if (m.tmp_path) newMap[m.tmp_path] = m.suggested_scene_number;
+              });
+              setFileSceneMap((prev) => ({ ...prev, ...newMap }));
+            }
+          }).catch(() => {});
+        } else {
+          setUnresolved([]);
+        }
+      }
     } catch (e) {
       console.error("Failed to load project details:", e);
     }
@@ -229,10 +310,11 @@ export function ManualWorkflowView({ initialProjectId, onProjectChange }: Manual
       setSelectedProjectId(newProj.id);
       if (onProjectChange) onProjectChange(newProj.id);
 
-      // Auto-trigger SEO generation for the new project
+      // Auto-trigger SEO & Thumbnail generation for the new project
       setLoadingSeo(true);
       const seo = await api.generateManualSeo(newProj.id, topicTitle);
       setSeoPkg(seo);
+      setThumbTimestamp(Date.now());
     } catch (e) {
       console.error("Failed to create project with topic:", e);
     } finally {
@@ -241,17 +323,39 @@ export function ManualWorkflowView({ initialProjectId, onProjectChange }: Manual
     }
   };
 
-  // Step 2 Actions: Generate SEO
+  // Step 2 Actions: Generate SEO & High-CTR Thumbnail
   const handleGenerateSeo = async () => {
     if (!selectedProjectId) return;
     setLoadingSeo(true);
     try {
       const seo = await api.generateManualSeo(selectedProjectId, topicInput);
       setSeoPkg(seo);
+      if (seo?.thumbnail_prompt) setThumbPrompt(seo.thumbnail_prompt);
+      setThumbTimestamp(Date.now());
     } catch (e) {
       console.error("Failed to generate SEO:", e);
     } finally {
       setLoadingSeo(false);
+    }
+  };
+
+  const handleGenerateThumbnail = async () => {
+    if (!selectedProjectId) return;
+    setGeneratingThumb(true);
+    setThumbError(null);
+    try {
+      const res = await api.generateThumbnail(selectedProjectId, {
+        aspect_ratio: "16:9",
+      });
+      if (res?.thumbnail_prompt) {
+        setThumbPrompt(res.thumbnail_prompt);
+      }
+      setThumbTimestamp(Date.now());
+    } catch (err: any) {
+      console.error("Failed to generate thumbnail:", err);
+      setThumbError(err.message || "Thumbnail generation failed.");
+    } finally {
+      setGeneratingThumb(false);
     }
   };
 
@@ -339,13 +443,15 @@ export function ManualWorkflowView({ initialProjectId, onProjectChange }: Manual
       const res = await api.batchUploadScenes(selectedProjectId, Array.from(files));
       setUploadResults(res.results || []);
       setUnresolved(res.unresolved || []);
-      // Reload scenes & status
-      const [updatedScenes, statusData] = await Promise.all([
+      // Reload scenes, status & readiness
+      const [updatedScenes, statusData, readyData] = await Promise.all([
         api.getScenes(selectedProjectId),
         api.getCopyStatus(selectedProjectId),
+        api.checkAssemblyReadiness(selectedProjectId).catch(() => null),
       ]);
       setScenes(updatedScenes as SceneWithStatus[]);
       setCopyStatus(statusData);
+      if (readyData) setReadiness(readyData);
     } catch (err: any) {
       alert("Upload failed: " + (err?.message || err));
     } finally {
@@ -360,14 +466,80 @@ export function ManualWorkflowView({ initialProjectId, onProjectChange }: Manual
       await api.assignUnresolvedVideo(selectedProjectId, assignTargetScene, assigningFile.tmp_path);
       setUnresolved((prev) => prev.filter((u) => u.tmp_path !== assigningFile.tmp_path));
       setAssigningFile(null);
-      const [updatedScenes, statusData] = await Promise.all([
+      const [updatedScenes, statusData, readyData] = await Promise.all([
         api.getScenes(selectedProjectId),
         api.getCopyStatus(selectedProjectId),
+        api.checkAssemblyReadiness(selectedProjectId).catch(() => null),
       ]);
       setScenes(updatedScenes as SceneWithStatus[]);
       setCopyStatus(statusData);
+      if (readyData) setReadiness(readyData);
     } catch (err: any) {
       alert("Assignment failed: " + (err?.message || err));
+    }
+  };
+
+  // AI Re-Match Unresolved Videos
+  const handleRunAiMatch = async () => {
+    if (!selectedProjectId) return;
+    setAiMatching(true);
+    try {
+      const res = await api.aiMatchVideos(selectedProjectId);
+      if (res.matches && res.matches.length > 0) {
+        setUnresolved((prev) =>
+          prev.map((item) => {
+            const match = res.matches.find(
+              (m) => m.filename === item.filename || m.tmp_path === item.tmp_path
+            );
+            if (match) {
+              return {
+                ...item,
+                suggested_scene_number: match.suggested_scene_number,
+                confidence: match.confidence,
+                match_reason: match.match_reason,
+                match_source: match.match_source,
+              };
+            }
+            return item;
+          })
+        );
+        const newMap: Record<string, number> = {};
+        res.matches.forEach((m) => {
+          if (m.tmp_path) newMap[m.tmp_path] = m.suggested_scene_number;
+        });
+        setFileSceneMap((prev) => ({ ...prev, ...newMap }));
+      }
+    } catch (err: any) {
+      alert("AI Matching failed: " + (err?.message || err));
+    } finally {
+      setAiMatching(false);
+    }
+  };
+
+  // Smart 1-Click AI Auto-Assign All
+  const handleAutoAssignAll = async () => {
+    if (!unresolved.length || !selectedProjectId) return;
+    setAutoAssigning(true);
+    try {
+      const assignments = unresolved.map((u) => ({
+        tmp_path: u.tmp_path,
+        scene_number: fileSceneMap[u.tmp_path] ?? u.suggested_scene_number ?? 1,
+        reason: u.match_reason,
+      }));
+      await api.autoAssignSmart(selectedProjectId, assignments);
+      setUnresolved([]);
+      const [updatedScenes, statusData, readyData] = await Promise.all([
+        api.getScenes(selectedProjectId),
+        api.getCopyStatus(selectedProjectId),
+        api.checkAssemblyReadiness(selectedProjectId).catch(() => null),
+      ]);
+      setScenes(updatedScenes as SceneWithStatus[]);
+      setCopyStatus(statusData);
+      if (readyData) setReadiness(readyData);
+    } catch (err: any) {
+      alert("Smart AI assignment failed: " + (err?.message || err));
+    } finally {
+      setAutoAssigning(false);
     }
   };
 
@@ -378,8 +550,12 @@ export function ManualWorkflowView({ initialProjectId, onProjectChange }: Manual
     try {
       await api.confirmSceneSequence(selectedProjectId, sequenceOrder);
       setSequenceConfirmed(true);
-      const updatedScenes = await api.getScenes(selectedProjectId);
+      const [updatedScenes, readyData] = await Promise.all([
+        api.getScenes(selectedProjectId),
+        api.checkAssemblyReadiness(selectedProjectId).catch(() => null),
+      ]);
       setScenes(updatedScenes as SceneWithStatus[]);
+      if (readyData) setReadiness(readyData);
     } catch (err: any) {
       alert("Failed to confirm sequence: " + (err?.message || err));
     } finally {
@@ -394,6 +570,13 @@ export function ManualWorkflowView({ initialProjectId, onProjectChange }: Manual
     try {
       const r = await api.checkAssemblyReadiness(selectedProjectId);
       setReadiness(r);
+      if (r.final_video_exists) {
+        setFinalVideoResult({
+          status: "completed",
+          final_video: r.final_video_url || `${API_BASE}/api/v1/projects/${selectedProjectId}/assembly/final-video`,
+          duration: r.final_video_duration || 0,
+        });
+      }
     } catch (e) {
       console.error("Readiness check failed:", e);
     } finally {
@@ -408,6 +591,9 @@ export function ManualWorkflowView({ initialProjectId, onProjectChange }: Manual
     try {
       const result = await api.generateFinalVideoFromUploads(selectedProjectId);
       setFinalVideoResult(result);
+      setThumbTimestamp(Date.now());
+      const readyData = await api.checkAssemblyReadiness(selectedProjectId).catch(() => null);
+      if (readyData) setReadiness(readyData);
     } catch (err: any) {
       setAssembleError(err?.message || "Final video assembly failed.");
     } finally {
@@ -469,14 +655,40 @@ export function ManualWorkflowView({ initialProjectId, onProjectChange }: Manual
             ))}
           </select>
           <button
-            onClick={() => loadProjectData(selectedProjectId)}
-            className="p-2 border border-[#E5E5EA] rounded-2xl hover:bg-[#F5F5F7] text-[#6E6E73] transition-colors"
-            title="Refresh current project data"
+            onClick={() => setShowEngineFlow(!showEngineFlow)}
+            className={`flex items-center gap-1.5 px-3 py-2 border rounded-2xl text-xs font-bold transition-all shadow-xs cursor-pointer ${
+              showEngineFlow
+                ? "bg-purple-50 text-purple-700 border-purple-300 ring-2 ring-purple-400/20"
+                : "bg-white hover:bg-orange-50 text-[#1D1D1F] border-[#E5E5EA]"
+            }`}
+            title="Toggle Live AI Engine Flowchart & Schematic"
           >
-            <RefreshCw className="w-4 h-4" />
+            <Activity className="w-3.5 h-3.5 text-[#FF6B00] animate-pulse" />
+            <span>{showEngineFlow ? "Hide Engine Flow" : "⚡ Live AI Engine Flow"}</span>
           </button>
         </div>
       </div>
+
+      {/* Interactive Engine Flow Schematic (Collapsible inside Studio) */}
+      {showEngineFlow && (
+        <section className="space-y-3 animate-in fade-in slide-in-from-top-4 duration-300">
+          <div className="flex items-center justify-between px-2">
+            <span className="text-xs font-extrabold uppercase tracking-wider text-[#6E6E73] flex items-center gap-1.5">
+              <Activity className="w-3.5 h-3.5 text-[#FF6B00]" />
+              Interactive Engine Flowchart • Cursor Hover for AI Details
+            </span>
+            <Link
+              href="/workflow"
+              className="text-xs font-bold text-[#FF6B00] hover:underline flex items-center gap-1"
+              target="_blank"
+            >
+              <span>Full Screen Architecture</span>
+              <ExternalLink className="w-3 h-3" />
+            </Link>
+          </div>
+          <InteractiveEngineFlow activeProjectId={selectedProjectId} />
+        </section>
+      )}
 
       {/* ─────────────────────────────────────────────────────────────────── */}
       {/* STEP 1: TOPIC SELECTION & DYNAMIC AI DISCOVERY (NO STATIC DATA)     */}
@@ -678,6 +890,122 @@ export function ManualWorkflowView({ initialProjectId, onProjectChange }: Manual
               <p className="text-xs font-medium text-[#1D1D1F] bg-white border border-[#E5E5EA] rounded-xl p-3 select-all">
                 {seoPkg.caption}
               </p>
+            </div>
+
+            {/* 5. High-CTR 3D Video Cover / Thumbnail */}
+            <div className="bg-[#FAFAFC] border border-[#E5E5EA] rounded-2xl p-4 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <span className="text-xs font-extrabold uppercase tracking-wider text-[#6E6E73] flex items-center gap-1.5">
+                  <ImageIcon className="w-3.5 h-3.5 text-orange-600" />
+                  High-CTR 3D YouTube Thumbnail (SEO & Kids Optimized)
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleGenerateThumbnail}
+                    disabled={generatingThumb || !selectedProjectId}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-orange-50 hover:bg-orange-100 border border-orange-200 rounded-xl text-xs font-bold text-[#FF6B00] transition-all"
+                  >
+                    {generatingThumb ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                    <span>{generatingThumb ? "Generating Cover…" : "Regenerate Thumbnail"}</span>
+                  </button>
+                  <a
+                    href={`${API_BASE}/api/v1/projects/${selectedProjectId}/thumbnail?t=${thumbTimestamp}`}
+                    download={`${activeProject?.title || "kids_song"}_thumbnail.jpg`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-[#E5E5EA] hover:bg-[#F5F5F7] rounded-xl text-xs font-bold text-[#1D1D1F] transition-all"
+                  >
+                    <Download className="w-3.5 h-3.5 text-[#86868B]" />
+                    <span>Download (.jpg)</span>
+                  </a>
+                </div>
+              </div>
+
+              {thumbError && (
+                <div className="p-2.5 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700">
+                  {thumbError}
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-center bg-white border border-[#E5E5EA] rounded-xl p-3">
+                <div className="relative aspect-video rounded-xl overflow-hidden bg-slate-900 border border-[#E5E5EA] shadow-sm md:col-span-2 group">
+                  <img
+                    src={`${API_BASE}/api/v1/projects/${selectedProjectId}/thumbnail?t=${thumbTimestamp}`}
+                    alt="High-CTR YouTube Cover"
+                    className="w-full h-full object-cover"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).src =
+                        "https://placehold.co/1280x720/1e293b/f8fafc?text=High-CTR+Thumbnail+Ready";
+                    }}
+                  />
+                  <div className="absolute top-2 left-2 px-2 py-0.5 rounded-full bg-red-600/90 text-white text-[10px] font-black uppercase tracking-wider backdrop-blur-xs">
+                    🔥 HIGH CTR / HIGH CPM
+                  </div>
+                  <div className="absolute bottom-2 right-2 px-2 py-0.5 rounded-md bg-black/80 text-white text-[10px] font-bold backdrop-blur-xs">
+                    16:9 • 1280x720
+                  </div>
+                </div>
+
+                <div className="space-y-2 text-xs text-[#6E6E73]">
+                  <div className="p-2 bg-[#FAFAFC] rounded-lg border border-[#E5E5EA] space-y-1">
+                    <span className="font-bold text-[#1D1D1F] block">🎨 Compact 3D Pixar Title</span>
+                    <p className="text-[11px] leading-relaxed">
+                      Short 1-2 word punchy title rendered with candy 3D bubble gradient that never blocks artwork.
+                    </p>
+                  </div>
+                  <div className="p-2 bg-[#FAFAFC] rounded-lg border border-[#E5E5EA] space-y-1">
+                    <span className="font-bold text-[#1D1D1F] block">⭐ High-CPM Badges</span>
+                    <p className="text-[11px] leading-relaxed">
+                      Includes preschool learning tags & character branding matching topic: <strong>{activeProject?.topic || "Nursery Rhymes"}</strong>
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* AI Thumbnail Prompt Box (Midjourney / Leonardo / Flux / DALL-E) */}
+              <div className="p-3.5 bg-gradient-to-r from-orange-50/80 via-amber-50/50 to-white border border-orange-200/90 rounded-xl space-y-2">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-[#FF6B00]" />
+                    <span className="text-xs font-bold text-[#1D1D1F]">
+                      🎨 AI Thumbnail Prompt (Midjourney / Leonardo / Flux / DALL-E)
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => {
+                      if (!thumbPrompt) return;
+                      navigator.clipboard.writeText(thumbPrompt);
+                      setCopiedThumbPrompt(true);
+                      setTimeout(() => setCopiedThumbPrompt(false), 2000);
+                    }}
+                    disabled={!thumbPrompt}
+                    className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 bg-white hover:bg-orange-50 border border-orange-300 rounded-lg text-xs font-bold text-[#FF6B00] shadow-xs transition-all active:scale-95 cursor-pointer"
+                  >
+                    {copiedThumbPrompt ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 text-green-600" />
+                        <span className="text-green-600">Copied to Clipboard!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5" />
+                        <span>Copy Prompt</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+                <div className="relative">
+                  <div className="text-xs font-mono text-[#334155] bg-white/95 p-3 rounded-lg border border-orange-200/60 leading-relaxed select-all max-h-28 overflow-y-auto">
+                    {thumbPrompt || "Generating tailored 3D Pixar kids prompt..."}
+                  </div>
+                </div>
+                <div className="flex items-center justify-between text-[11px] text-[#6E6E73]">
+                  <span>💡 Paste this prompt into Midjourney, Leonardo.ai, or Flux to create alternative 3D Pixar backgrounds!</span>
+                  <span className="text-[10px] font-semibold text-orange-600/90 bg-orange-100/60 px-2 py-0.5 rounded-md">
+                    Strictly No-Text 3D Artwork
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
         ) : (
@@ -1055,16 +1383,115 @@ export function ManualWorkflowView({ initialProjectId, onProjectChange }: Manual
       {/* STEP 10-12: SCENE VIDEO UPLOAD & DETERMINISTIC IDENTIFICATION        */}
       {/* ─────────────────────────────────────────────────────────────────── */}
       <section className="bg-white border border-[#E5E5EA] rounded-3xl p-6 shadow-xs space-y-5">
-        <div className="border-b border-[#E5E5EA] pb-4">
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-indigo-50 text-indigo-800 border border-indigo-200 mb-1">
-            <UploadCloud className="w-3.5 h-3.5 text-indigo-600" />
-            <span>Step 10 to 12 • Scene Video Upload</span>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#E5E5EA] pb-4">
+          <div className="space-y-0.5">
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-indigo-50 text-indigo-800 border border-indigo-200 mb-1">
+              <UploadCloud className="w-3.5 h-3.5 text-indigo-600" />
+              <span>Step 10 to 12 • Scene Video Upload</span>
+            </div>
+            <h3 className="text-lg font-bold text-[#1D1D1F]">Upload Generated Scene Videos</h3>
+            <p className="text-xs text-[#6E6E73]">
+              Drag & drop your AI-generated videos (MP4, MOV, WEBM). Files named <code>scene_01.mp4</code> or <code>01.mp4</code> auto-map to Scene 1.
+            </p>
           </div>
-          <h3 className="text-lg font-bold text-[#1D1D1F]">Upload Generated Scene Videos</h3>
-          <p className="text-xs text-[#6E6E73]">
-            Drag & drop your AI-generated videos (MP4, MOV, WEBM). Files named <code>scene_01.mp4</code> or <code>01.mp4</code> auto-map to Scene 1.
-          </p>
+
+          {/* Real-time Persistent Status Indicator */}
+          <div className="flex items-center gap-2">
+            {allUploaded && totalScenes > 0 ? (
+              <span className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-2xs">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                <span>{uploadedCount}/{totalScenes} Uploaded (100% Ready)</span>
+              </span>
+            ) : uploadedCount > 0 ? (
+              <span className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold bg-amber-100 text-amber-900 border border-amber-300 shadow-2xs">
+                <AlertTriangle className="w-4 h-4 text-amber-600" />
+                <span>{uploadedCount}/{totalScenes} Uploaded ({totalScenes - uploadedCount} Missing)</span>
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200">
+                <Upload className="w-4 h-4 text-slate-500" />
+                <span>0/{totalScenes} Uploaded</span>
+              </span>
+            )}
+          </div>
         </div>
+
+        {/* Real-time Scene Slot Occupancy Ribbon */}
+        {totalScenes > 0 && (
+          <div className={`rounded-2xl p-4 border transition-all ${
+            allUploaded
+              ? "bg-emerald-50/70 border-emerald-300 text-emerald-950 shadow-2xs"
+              : uploadedCount > 0
+              ? "bg-amber-50/70 border-amber-300 text-amber-950"
+              : "bg-slate-50 border-slate-200 text-slate-700"
+          }`}>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2.5 border-b border-black/5 text-xs">
+              <span className="font-bold flex items-center gap-1.5">
+                <ListOrdered className="w-4 h-4 text-indigo-600" />
+                <span>Scene Video Slots ({uploadedCount}/{totalScenes} Assigned)</span>
+              </span>
+              <span className="text-[11px] font-bold">
+                {allUploaded
+                  ? "🎉 All scene slots have video clips assigned! Ready for Step 15 Assembly below."
+                  : `⚠️ ${totalScenes - uploadedCount} scene slot(s) missing video files: Scenes ${scenes.filter(s => !s.uploaded_file).map(s => String(s.scene_number).padStart(2, "0")).join(", ")}`}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-9 gap-2.5 pt-3">
+              {scenes.map((s) => {
+                const hasFile = !!s.uploaded_file;
+                const fileName = s.uploaded_file ? s.uploaded_file.split("/").pop() : null;
+                const dur = s.uploaded_duration || s.duration || 0;
+                return (
+                  <div
+                    key={s.id}
+                    title={hasFile ? `Scene ${s.scene_number}: Assigned (${fileName} — ${dur.toFixed(1)}s)` : `Scene ${s.scene_number}: Vacant — upload or assign video clip`}
+                    className={`p-2.5 rounded-xl text-center flex flex-col items-center justify-between gap-1.5 border-2 transition-all min-h-[76px] ${
+                      hasFile
+                        ? "bg-white border-emerald-500 text-emerald-950 shadow-xs"
+                        : "bg-amber-50/60 border-dashed border-amber-400 text-amber-900"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between w-full">
+                      <span className="text-[11px] font-black tracking-tight">
+                        Scene {String(s.scene_number).padStart(2, "0")}
+                      </span>
+                      {hasFile ? (
+                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-black bg-emerald-100 text-emerald-800 border border-emerald-300">
+                          <Check className="w-2.5 h-2.5 text-emerald-600" />
+                          <span>Ready</span>
+                        </span>
+                      ) : (
+                        <span className="px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-amber-100 text-amber-800 border border-amber-300">
+                          ⚡ Vacant
+                        </span>
+                      )}
+                    </div>
+                    {hasFile ? (
+                      <div className="w-full flex flex-col items-center">
+                        <span className="text-[10px] font-mono font-bold text-slate-700 truncate w-full" title={fileName || ""}>
+                          🎬 {fileName}
+                        </span>
+                        <span className="text-[9px] font-semibold text-emerald-700">
+                          ⏱️ {dur.toFixed(1)}s
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="w-full text-center">
+                        <span className="text-[10px] font-medium text-amber-700 block">
+                          No Video
+                        </span>
+                        <span className="text-[9px] text-amber-500">
+                          Slot empty
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Drag & Drop Zone */}
         <div
@@ -1099,7 +1526,7 @@ export function ManualWorkflowView({ initialProjectId, onProjectChange }: Manual
               <p className="text-sm font-bold text-[#1D1D1F]">
                 {uploadingVideos ? "Uploading & Validating Video Durations…" : "Drag & Drop Scene Videos Here"}
               </p>
-              <p className="text-xs text-[#86868B] mt-1">Supports MP4, MOV, WEBM • Multiple files accepted</p>
+              <p className="text-xs text-[#86868B] mt-1">Supports MP4, MOV, WEBM • Multiple files accepted • Status is automatically saved</p>
             </div>
             <button
               onClick={() => videoFileInputRef.current?.click()}
@@ -1111,45 +1538,211 @@ export function ManualWorkflowView({ initialProjectId, onProjectChange }: Manual
           </div>
         </div>
 
-        {/* Unresolved Files Manual Assignment Dropdown (Section 18) */}
+        {/* Unresolved Files Smart AI Matching & Assignment */}
         {unresolved.length > 0 && (
-          <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 space-y-3">
-            <div className="flex items-center gap-2 text-amber-900 font-bold text-xs">
-              <AlertTriangle className="w-4 h-4 text-amber-600" />
-              <span>Unresolved Video Filenames — Manual Assignment Required:</span>
+          <div className="bg-gradient-to-br from-indigo-50/70 via-orange-50/50 to-amber-50/80 border border-orange-200/80 rounded-2xl p-5 space-y-4 shadow-2xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-orange-200/50">
+              <div className="space-y-0.5">
+                <p className="text-sm font-bold text-[#1D1D1F] flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-[#FF6B00]" />
+                  <span>AI Scene Prompt Matcher ({unresolved.length} clips uploaded)</span>
+                </p>
+                <p className="text-xs text-[#6E6E73]">
+                  Video titles are automatically compared with scene prompts, lyrics, and characters using AI.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleRunAiMatch}
+                  disabled={aiMatching}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-xs transition-all cursor-pointer disabled:opacity-50"
+                  title="Re-run AI to compare filenames with scene prompts"
+                >
+                  {aiMatching ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                  <span>{aiMatching ? "Matching with AI…" : "Re-Match with AI"}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleAutoAssignAll}
+                  disabled={autoAssigning}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-orange-500 to-amber-600 hover:opacity-90 text-white rounded-xl text-xs font-bold shadow-xs transition-all cursor-pointer disabled:opacity-50"
+                >
+                  {autoAssigning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                  <span>{autoAssigning ? "Assigning..." : "⚡ Apply AI Matches (Assign All)"}</span>
+                </button>
+              </div>
             </div>
-            <div className="space-y-2">
-              {unresolved.map((u, i) => (
-                <div key={i} className="flex items-center justify-between bg-white border border-amber-200 rounded-xl p-3 text-xs">
-                  <span className="font-mono text-[#1D1D1F] font-semibold">{u.filename}</span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[#86868B]">Assign to:</span>
-                    <select
-                      value={assigningFile?.tmp_path === u.tmp_path ? assignTargetScene : 1}
-                      onChange={(e) => {
-                        setAssigningFile(u);
-                        setAssignTargetScene(Number(e.target.value));
-                      }}
-                      className="border border-[#E5E5EA] rounded-lg px-2 py-1 font-bold text-xs"
+
+            {/* Scene Occupancy Tracker Ribbon */}
+            <div className="bg-white/80 border border-orange-200/60 rounded-xl p-3 space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                <span className="font-bold text-[#1D1D1F] flex items-center gap-1.5">
+                  <ListOrdered className="w-3.5 h-3.5 text-indigo-600" />
+                  Scene Slot Status ({scenes.filter((s) => !!s.uploaded_file).length}/{scenes.length} Assigned • {scenes.filter((s) => !s.uploaded_file).length} Vacant)
+                </span>
+                <span className="text-[11px] text-[#6E6E73]">
+                  ⚡ Vacant slots are prioritized for new clips
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {scenes.map((s) => {
+                  const isAssigned = !!s.uploaded_file;
+                  const cleanFileName = s.uploaded_file ? s.uploaded_file.split("/").pop() : null;
+                  return (
+                    <span
+                      key={s.scene_number}
+                      title={isAssigned ? `Scene ${s.scene_number}: Assigned (${cleanFileName})` : `Scene ${s.scene_number}: Vacant / No Video Clip`}
+                      className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all ${
+                        isAssigned
+                          ? "bg-emerald-50 text-emerald-800 border border-emerald-300"
+                          : "bg-amber-50 text-amber-800 border border-dashed border-amber-300"
+                      }`}
                     >
-                      {scenes.map((s) => (
-                        <option key={s.scene_number} value={s.scene_number}>
-                          Scene {String(s.scene_number).padStart(2, "0")}
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      onClick={() => {
-                        setAssigningFile(u);
-                        handleAssignUnresolved();
-                      }}
-                      className="px-3 py-1 bg-amber-600 text-white rounded-lg font-bold text-xs hover:bg-amber-700"
-                    >
-                      Assign
-                    </button>
+                      <span>Scene {String(s.scene_number).padStart(2, "0")}</span>
+                      {isAssigned ? (
+                        <span className="text-emerald-600 font-extrabold text-[10px]">✓ Assigned</span>
+                      ) : (
+                        <span className="text-amber-600 font-extrabold text-[10px]">⚡ Vacant</span>
+                      )}
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="space-y-2.5">
+              {unresolved.map((u, i) => {
+                const selectedTarget = fileSceneMap[u.tmp_path] ?? u.suggested_scene_number ?? (i + 1);
+                const matchedScene = scenes.find((s) => s.scene_number === selectedTarget);
+                const confidence = u.confidence ?? 50;
+                const isTargetAssigned = !!matchedScene?.uploaded_file;
+                const vacantScenes = scenes.filter((s) => !s.uploaded_file);
+                const assignedScenes = scenes.filter((s) => !!s.uploaded_file);
+
+                return (
+                  <div
+                    key={u.tmp_path || i}
+                    className="flex flex-col gap-2 bg-white/90 backdrop-blur-xs border border-orange-200/70 rounded-xl p-3 text-xs shadow-2xs hover:border-orange-300 transition-all"
+                  >
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <FileVideo className="w-4 h-4 text-indigo-600 shrink-0" />
+                        <span className="font-mono text-[#1D1D1F] font-semibold truncate max-w-sm" title={u.filename}>
+                          {u.filename}
+                        </span>
+                        {u.duration && (
+                          <span className="text-[10px] bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded font-mono shrink-0">
+                            {u.duration.toFixed(1)}s
+                          </span>
+                        )}
+                        {u.confidence && (
+                          <span
+                            className={`text-[10px] px-2 py-0.5 rounded-full font-bold flex items-center gap-1 shrink-0 ${
+                              confidence >= 80
+                                ? "bg-emerald-100 text-emerald-800 border border-emerald-200"
+                                : confidence >= 50
+                                ? "bg-amber-100 text-amber-800 border border-amber-200"
+                                : "bg-gray-100 text-gray-700 border border-gray-200"
+                            }`}
+                          >
+                            <Sparkles className="w-2.5 h-2.5" />
+                            {confidence >= 80 ? "High Match" : "Match"} ({Math.round(confidence)}%)
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <div className="flex flex-col items-end gap-0.5">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[#86868B] text-[11px] font-medium">Assign to:</span>
+                            <select
+                              value={selectedTarget}
+                              onChange={(e) => {
+                                const val = Number(e.target.value);
+                                setFileSceneMap((prev) => ({ ...prev, [u.tmp_path]: val }));
+                              }}
+                              className={`border rounded-lg px-2.5 py-1 font-bold text-xs bg-white focus:outline-none shadow-2xs ${
+                                isTargetAssigned ? "border-amber-400 text-amber-900 bg-amber-50/40" : "border-[#E5E5EA] text-[#1D1D1F]"
+                              }`}
+                            >
+                              {vacantScenes.length > 0 && (
+                                <optgroup label="⚡ Vacant / Empty Scenes (Recommended)">
+                                  {vacantScenes.map((s) => (
+                                    <option key={s.scene_number} value={s.scene_number}>
+                                      ⚡ Scene {String(s.scene_number).padStart(2, "0")} • Empty (Needs video)
+                                    </option>
+                                  ))}
+                                </optgroup>
+                              )}
+                              {assignedScenes.length > 0 && (
+                                <optgroup label="✓ Already Assigned Scenes (Will Overwrite)">
+                                  {assignedScenes.map((s) => {
+                                    const baseName = s.uploaded_file ? s.uploaded_file.split("/").pop() : "";
+                                    return (
+                                      <option key={s.scene_number} value={s.scene_number}>
+                                        ✓ Scene {String(s.scene_number).padStart(2, "0")} • Assigned: {baseName ? baseName.slice(0, 20) : "video"}
+                                      </option>
+                                    );
+                                  })}
+                                </optgroup>
+                              )}
+                            </select>
+                          </div>
+                          {isTargetAssigned ? (
+                            <span className="text-[10px] font-semibold text-amber-700">
+                              ⚠️ Replaces video in Scene {selectedTarget}
+                            </span>
+                          ) : (
+                            <span className="text-[10px] font-semibold text-emerald-700">
+                              ⚡ Slot is vacant
+                            </span>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            setAssigningFile(u);
+                            setAssignTargetScene(selectedTarget);
+                            try {
+                              await api.assignUnresolvedVideo(selectedProjectId, selectedTarget, u.tmp_path);
+                              setUnresolved((prev) => prev.filter((x) => x.tmp_path !== u.tmp_path));
+                              const [updatedScenes, statusData] = await Promise.all([
+                                api.getScenes(selectedProjectId),
+                                api.getCopyStatus(selectedProjectId),
+                              ]);
+                              setScenes(updatedScenes as SceneWithStatus[]);
+                              setCopyStatus(statusData);
+                            } catch (err: any) {
+                              alert("Assignment failed: " + err.message);
+                            }
+                          }}
+                          className="px-3.5 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-lg font-bold text-xs transition-colors cursor-pointer shadow-2xs"
+                        >
+                          Assign
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* AI Explanation and Prompt Preview */}
+                    {(u.match_reason || (matchedScene && (matchedScene.video_prompt || matchedScene.lyrics))) && (
+                      <div className="bg-slate-50 border border-slate-100 rounded-lg p-2 text-[11px] space-y-1">
+                        {u.match_reason && (
+                          <p className="text-indigo-900 font-medium flex items-center gap-1.5">
+                            <span className="font-bold text-indigo-700">AI Reason:</span> {u.match_reason}
+                          </p>
+                        )}
+                        {matchedScene && (matchedScene.video_prompt || matchedScene.lyrics) && (
+                          <p className="text-[#6E6E73] truncate">
+                            <span className="font-semibold text-[#1D1D1F]">Scene {matchedScene.scene_number} Target Prompt:</span>{" "}
+                            {matchedScene.lyrics ? `"${matchedScene.lyrics}" • ` : ""}{matchedScene.video_prompt || ""}
+                          </p>
+                        )}
+                      </div>
+                    )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
@@ -1254,13 +1847,32 @@ export function ManualWorkflowView({ initialProjectId, onProjectChange }: Manual
             <button
               onClick={handleGenerateFinalVideo}
               disabled={assembling || !selectedProjectId || !allUploaded}
-              className="px-6 py-2.5 bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 text-white rounded-2xl text-xs font-black transition-all shadow-lg shadow-emerald-500/25 flex items-center gap-2 disabled:opacity-50"
+              title={!allUploaded ? `Cannot assemble: ${totalScenes - uploadedCount} scene(s) still missing video clips` : "Generate final video"}
+              className={`px-6 py-2.5 rounded-2xl text-xs font-black transition-all flex items-center gap-2 ${
+                allUploaded && selectedProjectId
+                  ? "bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 text-white shadow-lg shadow-emerald-500/25 cursor-pointer"
+                  : "bg-slate-200 text-slate-400 cursor-not-allowed opacity-60"
+              }`}
             >
               {assembling ? <Loader2 className="w-4 h-4 animate-spin" /> : <Film className="w-4 h-4" />}
               <span>{assembling ? "Assembling Final Video with FFmpeg…" : "🚀 GENERATE FINAL VIDEO"}</span>
             </button>
           </div>
         </div>
+
+        {/* Validation Banner — shown when scenes are missing */}
+        {!allUploaded && totalScenes > 0 && (
+          <div className="flex flex-col gap-1.5 p-4 bg-red-50 border-2 border-red-300 rounded-2xl">
+            <div className="flex items-center gap-2 text-sm font-bold text-red-900">
+              <AlertTriangle className="w-4 h-4 text-red-600 flex-shrink-0" />
+              <span>⛔ Cannot Assemble — {totalScenes - uploadedCount} of {totalScenes} scene{totalScenes - uploadedCount !== 1 ? "s" : ""} missing video clips</span>
+            </div>
+            <p className="text-xs text-red-700">
+              Upload or assign video files to all scene slots above before assembling the final video.
+              Missing: Scenes {scenes.filter(s => !s.uploaded_file).map(s => String(s.scene_number).padStart(2, "0")).join(", ")}
+            </p>
+          </div>
+        )}
 
         {/* Readiness Info */}
         {readiness && (
@@ -1281,31 +1893,111 @@ export function ManualWorkflowView({ initialProjectId, onProjectChange }: Manual
           </div>
         )}
 
-        {/* Final Video Result Player */}
+        {/* Final Video Result Player & High-CTR Thumbnail */}
         {finalVideoResult && (
-          <div className="bg-[#FAFAFC] border border-emerald-300 rounded-3xl p-6 space-y-4">
-            <div className="flex items-center justify-between">
+          <div className="bg-[#FAFAFC] border border-emerald-300 rounded-3xl p-6 space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-emerald-200 pb-4">
               <div className="flex items-center gap-2 text-emerald-800 font-bold text-sm">
-                <CheckCircle2 className="w-5 h-5 text-emerald-600" />
-                <span>Final Video Assembled Successfully! ({finalVideoResult.duration?.toFixed(1)}s)</span>
+                <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0" />
+                <span>Final Video & High-CTR Thumbnail Ready! ({finalVideoResult.duration?.toFixed(1)}s)</span>
               </div>
-              <a
-                href={`${API_BASE}/api/v1/projects/${selectedProjectId}/assembly/final-video`}
-                download={`${activeProject?.title || "kids_song"}.mp4`}
-                className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-emerald-500/20"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>Download MP4</span>
-              </a>
+              <div className="flex items-center gap-2">
+                <a
+                  href={`${API_BASE}/api/v1/projects/${selectedProjectId}/thumbnail?t=${thumbTimestamp}`}
+                  download={`${activeProject?.title || "kids_song"}_thumbnail.jpg`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-1.5 px-3.5 py-2 bg-orange-50 hover:bg-orange-100 border border-orange-200 text-[#FF6B00] rounded-xl text-xs font-bold transition-all"
+                >
+                  <ImageIcon className="w-3.5 h-3.5" />
+                  <span>Download Cover</span>
+                </a>
+                <a
+                  href={`${API_BASE}/api/v1/projects/${selectedProjectId}/assembly/final-video`}
+                  download={`${activeProject?.title || "kids_song"}.mp4`}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-emerald-500/20"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Download MP4</span>
+                </a>
+              </div>
             </div>
 
-            <div className="rounded-2xl overflow-hidden bg-black aspect-video max-w-3xl mx-auto shadow-xl">
-              <video
-                src={`${API_BASE}/api/v1/projects/${selectedProjectId}/assembly/final-video?t=${Date.now()}`}
-                controls
-                playsInline
-                className="w-full h-full"
-              />
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+              {/* Left: Video Player */}
+              <div className="lg:col-span-7 space-y-2">
+                <span className="text-xs font-bold text-[#1D1D1F] flex items-center gap-1.5">
+                  <Film className="w-3.5 h-3.5 text-emerald-600" />
+                  Master Video Player (1080p Full Song)
+                </span>
+                <div className="rounded-2xl overflow-hidden bg-black aspect-video shadow-xl">
+                  <video
+                    src={`${API_BASE}/api/v1/projects/${selectedProjectId}/assembly/final-video?t=${Date.now()}`}
+                    controls
+                    playsInline
+                    className="w-full h-full"
+                  />
+                </div>
+              </div>
+
+              {/* Right: High-CTR Thumbnail Card */}
+              <div className="lg:col-span-5 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-[#1D1D1F] flex items-center gap-1.5">
+                    <ImageIcon className="w-3.5 h-3.5 text-orange-600" />
+                    High-CTR 3D YouTube Cover
+                  </span>
+                  <button
+                    onClick={handleGenerateThumbnail}
+                    disabled={generatingThumb}
+                    className="text-[11px] font-bold text-[#FF6B00] hover:underline flex items-center gap-1"
+                  >
+                    {generatingThumb ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                    <span>Refresh Cover</span>
+                  </button>
+                </div>
+                <div className="relative rounded-2xl overflow-hidden bg-slate-900 border border-[#E5E5EA] aspect-video shadow-lg group">
+                  <img
+                    src={`${API_BASE}/api/v1/projects/${selectedProjectId}/thumbnail?t=${thumbTimestamp}`}
+                    alt="High-CTR YouTube Cover"
+                    className="w-full h-full object-cover"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).src =
+                        "https://placehold.co/1280x720/1e293b/f8fafc?text=High-CTR+Thumbnail+Ready";
+                    }}
+                  />
+                  <div className="absolute top-2 left-2 px-2 py-0.5 rounded-full bg-red-600/90 text-white text-[10px] font-black uppercase tracking-wider backdrop-blur-xs">
+                    🔥 HIGH CTR / HIGH CPM
+                  </div>
+                  <div className="absolute bottom-2 right-2 px-2 py-0.5 rounded-md bg-black/80 text-white text-[10px] font-bold backdrop-blur-xs">
+                    16:9 • 1280x720
+                  </div>
+                </div>
+                <div className="p-2.5 bg-orange-50/70 border border-orange-200/80 rounded-xl space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-[#1D1D1F] flex items-center gap-1">
+                      <Sparkles className="w-3 h-3 text-[#FF6B00]" />
+                      AI Thumbnail Prompt
+                    </span>
+                    <button
+                      onClick={() => {
+                        if (!thumbPrompt) return;
+                        navigator.clipboard.writeText(thumbPrompt);
+                        setCopiedThumbPrompt(true);
+                        setTimeout(() => setCopiedThumbPrompt(false), 2000);
+                      }}
+                      disabled={!thumbPrompt}
+                      className="text-[11px] font-bold text-[#FF6B00] hover:underline flex items-center gap-1 cursor-pointer"
+                    >
+                      {copiedThumbPrompt ? <Check className="w-3 h-3 text-green-600" /> : <Copy className="w-3 h-3" />}
+                      <span>{copiedThumbPrompt ? "Copied!" : "Copy Prompt"}</span>
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-[#6E6E73] leading-relaxed">
+                    Rendered with compact 3D Pixar headline, preschool badges, and AI thematic background (never sampled from video scenes).
+                  </p>
+                </div>
+              </div>
             </div>
           </div>
         )}

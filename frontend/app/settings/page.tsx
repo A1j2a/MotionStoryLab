@@ -90,6 +90,32 @@ export default function SettingsPage() {
   const [thumbTestResult, setThumbTestResult] = useState<any | null>(null);
   const [thumbTestError, setThumbTestError] = useState<string | null>(null);
 
+  // Channel Logo & Watermark State
+  const [channelLogoUrl, setChannelLogoUrl] = useState<string | null>(null);
+  const [channelLogoEnabled, setChannelLogoEnabled] = useState(true);
+  const [channelLogoPosition, setChannelLogoPosition] = useState("bottom_right");
+  const [channelLogoOpacity, setChannelLogoOpacity] = useState(0.95);
+  const [channelLogoScale, setChannelLogoScale] = useState(180);
+  const [channelLogoBottomSpacing, setChannelLogoBottomSpacing] = useState(24);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
+
+  // Intro & Outro Video State
+  const [introClipUrl, setIntroClipUrl] = useState<string | null>(null);
+  const [introEnabled, setIntroEnabled] = useState(true);
+  const [introDuration, setIntroDuration] = useState<number | null>(null);
+  const [uploadingIntro, setUploadingIntro] = useState(false);
+
+  const [outroClipUrl, setOutroClipUrl] = useState<string | null>(null);
+  const [outroEnabled, setOutroEnabled] = useState(true);
+  const [outroDuration, setOutroDuration] = useState<number | null>(null);
+  const [uploadingOutro, setUploadingOutro] = useState(false);
+
+  // Multi-Track Audio & Subtitles State
+  const [sceneAudioVolume, setSceneAudioVolume] = useState(0.70);
+  const [songAudioVolume, setSongAudioVolume] = useState(1.00);
+  const [burnSubtitles, setBurnSubtitles] = useState(true);
+  const [subtitleFontSize, setSubtitleFontSize] = useState(24);
+
   // Text Model Testing State
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<TestConnectionResult | null>(null);
@@ -156,6 +182,22 @@ export default function SettingsPage() {
       setThumbModel(data.thumbnail_model || "high_ctr_graphic");
       setThumbAspectRatio(data.thumbnail_aspect_ratio || "16:9");
       setAutoSongEnabled(data.auto_song_generation_enabled !== false);
+      setChannelLogoUrl(data.channel_logo_url || null);
+      setChannelLogoEnabled(data.channel_logo_enabled !== false);
+      setChannelLogoPosition(data.channel_logo_position || "bottom_right");
+      setChannelLogoOpacity(data.channel_logo_opacity !== undefined ? data.channel_logo_opacity : 0.95);
+      setChannelLogoScale(data.channel_logo_scale || 180);
+      setChannelLogoBottomSpacing(data.channel_logo_bottom_spacing !== undefined ? data.channel_logo_bottom_spacing : 24);
+      setIntroClipUrl(data.intro_clip_url || null);
+      setIntroEnabled(data.intro_enabled !== false);
+      setIntroDuration(data.intro_duration || null);
+      setOutroClipUrl(data.outro_clip_url || null);
+      setOutroEnabled(data.outro_enabled !== false);
+      setOutroDuration(data.outro_duration || null);
+      setSceneAudioVolume(data.scene_audio_volume !== undefined ? data.scene_audio_volume : 0.70);
+      setSongAudioVolume(data.song_audio_volume !== undefined ? data.song_audio_volume : 1.00);
+      setBurnSubtitles(data.burn_subtitles !== false);
+      setSubtitleFontSize(data.subtitle_font_size || 24);
     } catch (err) {
       console.error("Failed to load AI settings:", err);
     }
@@ -217,6 +259,17 @@ export default function SettingsPage() {
         thumbnail_model: thumbModel,
         thumbnail_aspect_ratio: thumbAspectRatio,
         auto_song_generation_enabled: isAutoSongEnabled,
+        channel_logo_enabled: channelLogoEnabled,
+        channel_logo_position: channelLogoPosition,
+        channel_logo_opacity: channelLogoOpacity,
+        channel_logo_scale: channelLogoScale,
+        channel_logo_bottom_spacing: channelLogoBottomSpacing,
+        intro_enabled: introEnabled,
+        outro_enabled: outroEnabled,
+        scene_audio_volume: sceneAudioVolume,
+        song_audio_volume: songAudioVolume,
+        burn_subtitles: burnSubtitles,
+        subtitle_font_size: subtitleFontSize,
       });
       setAiSettings(updated);
       setEnabled(updated.openrouter_enabled);
@@ -233,6 +286,11 @@ export default function SettingsPage() {
       setWanTestMode(updated.wan_test_mode || false);
       setThumbEnabled(updated.thumbnail_generator_enabled);
       setAutoSongEnabled(updated.auto_song_generation_enabled !== false);
+      setChannelLogoUrl(updated.channel_logo_url || null);
+      setIntroClipUrl(updated.intro_clip_url || null);
+      setIntroDuration(updated.intro_duration || null);
+      setOutroClipUrl(updated.outro_clip_url || null);
+      setOutroDuration(updated.outro_duration || null);
       if (updated.openrouter_api_key) {
         setApiKey(updated.openrouter_api_key);
       }
@@ -243,9 +301,97 @@ export default function SettingsPage() {
         setFalKeySaved(false);
       }, 3000);
     } catch (err: any) {
-      alert("Failed to save AI settings: " + err.message);
+      alert("Failed to save settings: " + err.message);
     } finally {
       setSavingAI(false);
+    }
+  };
+
+  // Channel Watermark Logo Handlers
+  const handleUploadLogoFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingLogo(true);
+    try {
+      const res = await api.uploadChannelLogo(file);
+      setChannelLogoUrl(`${res.logo_url}?t=${Date.now()}`);
+      setChannelLogoEnabled(true);
+      alert("✓ Channel watermark logo uploaded successfully! It will be overlaid on videos in the bottom-right corner.");
+    } catch (err: any) {
+      alert("Logo upload failed: " + err.message);
+    } finally {
+      setUploadingLogo(false);
+    }
+  };
+
+  const handleDeleteLogo = async () => {
+    if (!confirm("Are you sure you want to remove the channel watermark logo?")) return;
+    try {
+      await api.deleteChannelLogo();
+      setChannelLogoUrl(null);
+      setChannelLogoEnabled(false);
+    } catch (err: any) {
+      alert("Failed to remove logo: " + err.message);
+    }
+  };
+
+  // Intro Clip Handlers
+  const handleUploadIntroFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingIntro(true);
+    try {
+      const res = await api.uploadIntroClip(file);
+      setIntroClipUrl(`${res.intro_url}?t=${Date.now()}`);
+      setIntroDuration(res.duration || null);
+      setIntroEnabled(true);
+      alert(`✓ Intro clip uploaded (${res.duration?.toFixed(1) || 0}s)! It will play at the start with its own audio, and the song will start when scenes begin.`);
+    } catch (err: any) {
+      alert("Intro upload failed: " + err.message);
+    } finally {
+      setUploadingIntro(false);
+    }
+  };
+
+  const handleDeleteIntro = async () => {
+    if (!confirm("Remove intro clip?")) return;
+    try {
+      await api.deleteIntroClip();
+      setIntroClipUrl(null);
+      setIntroEnabled(false);
+      setIntroDuration(null);
+    } catch (err: any) {
+      alert("Failed to remove intro: " + err.message);
+    }
+  };
+
+  // Outro Clip Handlers
+  const handleUploadOutroFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingOutro(true);
+    try {
+      const res = await api.uploadOutroClip(file);
+      setOutroClipUrl(`${res.outro_url}?t=${Date.now()}`);
+      setOutroDuration(res.duration || null);
+      setOutroEnabled(true);
+      alert(`✓ Outro clip uploaded (${res.duration?.toFixed(1) || 0}s)! It will play at the end with its own audio after scenes complete.`);
+    } catch (err: any) {
+      alert("Outro upload failed: " + err.message);
+    } finally {
+      setUploadingOutro(false);
+    }
+  };
+
+  const handleDeleteOutro = async () => {
+    if (!confirm("Remove outro clip?")) return;
+    try {
+      await api.deleteOutroClip();
+      setOutroClipUrl(null);
+      setOutroEnabled(false);
+      setOutroDuration(null);
+    } catch (err: any) {
+      alert("Failed to remove outro: " + err.message);
     }
   };
 
@@ -1153,7 +1299,341 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        {/* 4. Local Tool Servers & Resource Optimizer */}
+        {/* 5. Channel Branding & Video Compositing (Watermark Logo, Intro/Outro & Audio Mix) */}
+        <div className="bg-white border border-[#E5E5EA] rounded-2xl p-6 space-y-6 shadow-xs relative overflow-hidden">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-[#E5E5EA] gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-[#EFF6FF] text-[#2563EB] flex items-center justify-center border border-[#BFDBFE]">
+                <Film className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-base font-bold text-[#1D1D1F]">
+                    Channel Branding & Video Compositing
+                  </h2>
+                  <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-[#EFF6FF] text-[#2563EB] border border-[#BFDBFE]">
+                    Watermark & Stems
+                  </span>
+                </div>
+                <p className="text-xs text-[#86868B] mt-0.5">
+                  Configure channel logo overlay, intro/outro bumpers, multi-track audio mixing, and synchronized subtitles
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => handleSaveAISettings()}
+              disabled={savingAI}
+              className="px-4 py-2 rounded-xl text-xs font-bold bg-[#2563EB] text-white hover:bg-[#1D4ED8] shadow-xs transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>{savingAI ? "Saving..." : "Save Branding Config"}</span>
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Left: Channel Watermark Logo Box */}
+            <div className="space-y-4 p-4 rounded-xl bg-[#FAFAFA] border border-[#E5E5EA]">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-[#1D1D1F] flex items-center gap-1.5">
+                  <ImageIcon className="w-4 h-4 text-[#2563EB]" />
+                  <span>Channel Watermark Logo</span>
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="logo-toggle"
+                    checked={channelLogoEnabled}
+                    onChange={(e) => setChannelLogoEnabled(e.target.checked)}
+                    className="w-3.5 h-3.5 text-[#2563EB] rounded cursor-pointer"
+                  />
+                  <label htmlFor="logo-toggle" className="text-xs font-semibold text-[#1D1D1F] cursor-pointer">
+                    Enable Overlay
+                  </label>
+                </div>
+              </div>
+
+              {/* Logo Preview Canvas */}
+              <div className="relative rounded-xl overflow-hidden bg-slate-900 border border-[#E5E5EA] aspect-video flex items-center justify-center group shadow-inner">
+                {channelLogoUrl ? (
+                  <>
+                    <div className="absolute inset-0 bg-gradient-to-tr from-indigo-900/60 via-purple-900/40 to-slate-900 flex items-center justify-center text-slate-400 text-xs font-mono">
+                      [Video Preview Canvas • 1080p]
+                    </div>
+                    {/* Positioned Logo Badge with Live Bottom Spacing and Opacity */}
+                    <div
+                      className="absolute transition-all duration-100 ease-out"
+                      style={{
+                        opacity: channelLogoOpacity,
+                        bottom: channelLogoPosition.startsWith("bottom")
+                          ? `${Math.max(4, Math.round(channelLogoBottomSpacing * 0.22))}px`
+                          : undefined,
+                        top: channelLogoPosition.startsWith("top")
+                          ? `${Math.max(4, Math.round(channelLogoBottomSpacing * 0.22))}px`
+                          : undefined,
+                        left: channelLogoPosition.endsWith("left") ? "12px" : undefined,
+                        right: channelLogoPosition.endsWith("right") ? "12px" : undefined,
+                      }}
+                    >
+                      <img
+                        src={channelLogoUrl}
+                        alt="Channel Logo"
+                        style={{ width: `${Math.round(channelLogoScale * 0.45)}px` }}
+                        className="object-contain drop-shadow-md rounded-md bg-white/10 p-1"
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <div className="text-center p-4 space-y-1">
+                    <ImageIcon className="w-8 h-8 text-slate-500 mx-auto opacity-60" />
+                    <p className="text-xs text-slate-400 font-medium">No channel watermark logo uploaded yet</p>
+                    <p className="text-[10px] text-slate-500">Upload PNG with transparent background</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Upload & Controls */}
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <label className="flex-1 px-3 py-2 bg-white hover:bg-slate-50 border border-[#E5E5EA] rounded-xl text-xs font-bold text-[#1D1D1F] cursor-pointer text-center transition-all flex items-center justify-center gap-1.5 shadow-2xs">
+                    {uploadingLogo ? <RefreshCw className="w-3.5 h-3.5 animate-spin text-[#2563EB]" /> : <UploadCloud className="w-3.5 h-3.5 text-[#2563EB]" />}
+                    <span>{uploadingLogo ? "Uploading Logo…" : "Upload Logo (PNG / WEBP)"}</span>
+                    <input
+                      type="file"
+                      accept="image/png,image/webp,image/jpeg"
+                      onChange={handleUploadLogoFile}
+                      className="hidden"
+                    />
+                  </label>
+                  {channelLogoUrl && (
+                    <button
+                      type="button"
+                      onClick={handleDeleteLogo}
+                      className="px-3 py-2 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 pt-1">
+                  <div>
+                    <label className="text-[11px] font-bold text-[#6E6E73] block mb-1">Logo Position</label>
+                    <select
+                      value={channelLogoPosition}
+                      onChange={(e) => setChannelLogoPosition(e.target.value)}
+                      className="w-full bg-white border border-[#E5E5EA] rounded-lg px-2.5 py-1.5 text-xs text-[#1D1D1F] font-semibold cursor-pointer"
+                    >
+                      <option value="bottom_right">Bottom Right (Dynasty Style - Recommended)</option>
+                      <option value="top_right">Top Right Corner</option>
+                      <option value="bottom_left">Bottom Left Corner</option>
+                      <option value="top_left">Top Left Corner</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="text-[11px] font-bold text-[#6E6E73]">Logo Width</label>
+                      <span className="text-[11px] font-mono text-[#2563EB] font-bold">{channelLogoScale}px</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="100"
+                      max="300"
+                      step="5"
+                      value={channelLogoScale}
+                      onChange={(e) => setChannelLogoScale(Number(e.target.value))}
+                      className="w-full cursor-pointer accent-[#2563EB]"
+                    />
+                  </div>
+
+                  <div>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="text-[11px] font-bold text-[#6E6E73]">
+                        {channelLogoPosition.startsWith("top") ? "Top Margin / Spacing" : "Bottom Spacing / Offset"}
+                      </label>
+                      <span className="text-[11px] font-mono text-[#2563EB] font-bold">{channelLogoBottomSpacing}px</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0"
+                      max="160"
+                      step="2"
+                      value={channelLogoBottomSpacing}
+                      onChange={(e) => setChannelLogoBottomSpacing(Number(e.target.value))}
+                      className="w-full cursor-pointer accent-[#2563EB]"
+                    />
+                  </div>
+
+                  <div>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="text-[11px] font-bold text-[#6E6E73]">Logo Opacity</label>
+                      <span className="text-[11px] font-mono text-[#2563EB] font-bold">{Math.round(channelLogoOpacity * 100)}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="20"
+                      max="100"
+                      step="5"
+                      value={Math.round(channelLogoOpacity * 100)}
+                      onChange={(e) => setChannelLogoOpacity(Number(e.target.value) / 100)}
+                      className="w-full cursor-pointer accent-[#2563EB]"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Right: Intro & Outro Video Clips */}
+            <div className="space-y-4 p-4 rounded-xl bg-[#FAFAFA] border border-[#E5E5EA]">
+              <label className="text-xs font-bold text-[#1D1D1F] flex items-center gap-1.5">
+                <Video className="w-4 h-4 text-[#9333EA]" />
+                <span>Intro & Outro Clips (Inbuilt Audio Preserved)</span>
+              </label>
+
+              {/* Intro Clip Upload Card */}
+              <div className="p-3 bg-white rounded-xl border border-[#E5E5EA] space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-[#1D1D1F] flex items-center gap-1">
+                    <span>🎬 Intro Clip (Plays before scenes)</span>
+                    {introDuration && <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.2 rounded font-mono">{introDuration.toFixed(1)}s</span>}
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={introEnabled}
+                    onChange={(e) => setIntroEnabled(e.target.checked)}
+                    className="w-3.5 h-3.5 text-[#9333EA] rounded cursor-pointer"
+                  />
+                </div>
+                <p className="text-[10px] text-[#6E6E73]">
+                  Plays at the start with its own audio. The generated song will only start when Scene 1 begins.
+                </p>
+                <div className="flex items-center gap-2">
+                  <label className="flex-1 px-3 py-1.5 bg-slate-50 hover:bg-slate-100 border border-[#E5E5EA] rounded-lg text-xs font-bold text-[#1D1D1F] cursor-pointer text-center transition-all flex items-center justify-center gap-1.5 shadow-2xs">
+                    {uploadingIntro ? <RefreshCw className="w-3.5 h-3.5 animate-spin text-[#9333EA]" /> : <UploadCloud className="w-3.5 h-3.5 text-[#9333EA]" />}
+                    <span>{introClipUrl ? "Replace Intro Clip" : "Upload Intro Clip (MP4)"}</span>
+                    <input
+                      type="file"
+                      accept="video/mp4,video/quicktime,video/webm"
+                      onChange={handleUploadIntroFile}
+                      className="hidden"
+                    />
+                  </label>
+                  {introClipUrl && (
+                    <button
+                      type="button"
+                      onClick={handleDeleteIntro}
+                      className="px-2.5 py-1.5 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 rounded-lg text-xs font-bold transition-colors cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Outro Clip Upload Card */}
+              <div className="p-3 bg-white rounded-xl border border-[#E5E5EA] space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-[#1D1D1F] flex items-center gap-1">
+                    <span>🎬 Outro / End-Screen Clip (Plays after scenes)</span>
+                    {outroDuration && <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.2 rounded font-mono">{outroDuration.toFixed(1)}s</span>}
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={outroEnabled}
+                    onChange={(e) => setOutroEnabled(e.target.checked)}
+                    className="w-3.5 h-3.5 text-[#9333EA] rounded cursor-pointer"
+                  />
+                </div>
+                <p className="text-[10px] text-[#6E6E73]">
+                  Plays at the end with its own audio. The generated song stops before the outro begins.
+                </p>
+                <div className="flex items-center gap-2">
+                  <label className="flex-1 px-3 py-1.5 bg-slate-50 hover:bg-slate-100 border border-[#E5E5EA] rounded-lg text-xs font-bold text-[#1D1D1F] cursor-pointer text-center transition-all flex items-center justify-center gap-1.5 shadow-2xs">
+                    {uploadingOutro ? <RefreshCw className="w-3.5 h-3.5 animate-spin text-[#9333EA]" /> : <UploadCloud className="w-3.5 h-3.5 text-[#9333EA]" />}
+                    <span>{outroClipUrl ? "Replace Outro Clip" : "Upload Outro Clip (MP4)"}</span>
+                    <input
+                      type="file"
+                      accept="video/mp4,video/quicktime,video/webm"
+                      onChange={handleUploadOutroFile}
+                      className="hidden"
+                    />
+                  </label>
+                  {outroClipUrl && (
+                    <button
+                      type="button"
+                      onClick={handleDeleteOutro}
+                      className="px-2.5 py-1.5 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 rounded-lg text-xs font-bold transition-colors cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Bottom: Multi-Track Audio Mixing & Synchronized Subtitles */}
+          <div className="p-4 rounded-xl bg-[#F0FDF4] border border-[#BBF7D0] space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-[#166534] flex items-center gap-1.5">
+                <Music className="w-4 h-4 text-[#16A34A]" />
+                <span>Multi-Track Audio Mixing & Synchronized Lyrics Subtitles</span>
+              </span>
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="subs-toggle"
+                  checked={burnSubtitles}
+                  onChange={(e) => setBurnSubtitles(e.target.checked)}
+                  className="w-3.5 h-3.5 text-[#16A34A] rounded cursor-pointer"
+                />
+                <label htmlFor="subs-toggle" className="text-xs font-semibold text-[#166534] cursor-pointer">
+                  Burn SRT Subtitles onto Video
+                </label>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+              <div className="space-y-1">
+                <div className="flex items-center justify-between text-xs text-[#166534] font-semibold">
+                  <span>Scene Clips Sound FX / Voices Volume:</span>
+                  <span className="font-mono font-bold">{Math.round(sceneAudioVolume * 100)}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="1.5"
+                  step="0.05"
+                  value={sceneAudioVolume}
+                  onChange={(e) => setSceneAudioVolume(Number(e.target.value))}
+                  className="w-full cursor-pointer accent-[#16A34A]"
+                />
+                <span className="text-[10px] text-[#15803D] block">Preserves character dialogues & sound effects from video clips</span>
+              </div>
+
+              <div className="space-y-1">
+                <div className="flex items-center justify-between text-xs text-[#166534] font-semibold">
+                  <span>Master Suno Song / Music Volume:</span>
+                  <span className="font-mono font-bold">{Math.round(songAudioVolume * 100)}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="1.5"
+                  step="0.05"
+                  value={songAudioVolume}
+                  onChange={(e) => setSongAudioVolume(Number(e.target.value))}
+                  className="w-full cursor-pointer accent-[#16A34A]"
+                />
+                <span className="text-[10px] text-[#15803D] block">Main sing-along nursery song volume</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* 6. Local Tool Servers & Resource Optimizer */}
         <div className="bg-white border border-[#E5E5EA] rounded-2xl p-6 space-y-5 shadow-xs">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-[#E5E5EA] gap-3">
             <div className="flex items-center gap-3">

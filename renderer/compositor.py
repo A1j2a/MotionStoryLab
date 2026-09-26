@@ -309,6 +309,168 @@ def generate_thumbnail(video_path: str, output_thumbnail_path: str) -> str:
     return output_thumbnail_path
 
 
+def _get_best_font(size: int, bold: bool = True):
+    """Safely find and return the best available rounded cartoon/Pixar font for high-CTR thumbnails."""
+    from PIL import ImageFont
+    font_candidates = [
+        "/System/Library/Fonts/Supplemental/Arial Rounded Bold.ttf",
+        "/System/Library/Fonts/Supplemental/ChalkboardSE.ttc",
+        "/System/Library/Fonts/Supplemental/Arial Black.ttf",
+        "/System/Library/Fonts/Supplemental/Comic Sans MS Bold.ttf",
+        "/System/Library/Fonts/Supplemental/Arial Bold.ttf" if bold else "/System/Library/Fonts/Supplemental/Arial.ttf",
+        "/System/Library/Fonts/Supplemental/Trebuchet MS Bold.ttf",
+        "/System/Library/Fonts/Supplemental/Impact.ttf",
+        "/System/Library/Fonts/Helvetica.ttc",
+        "/Library/Fonts/Arial Bold.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
+    ]
+    for font_path in font_candidates:
+        if os.path.exists(font_path):
+            try:
+                return ImageFont.truetype(font_path, size=size)
+            except Exception:
+                continue
+    try:
+        return ImageFont.load_default(size=size)
+    except Exception:
+        return ImageFont.load_default()
+
+
+def extract_short_thumbnail_title(title: str, topic: str = "") -> str:
+    """
+    Extracts a super-short, punchy 1 to 3 word headline (max ~16 chars) for YouTube Kids CTR.
+    Removes generic filler words, subtitles, emojis, and punctuation so the headline
+    never covers or dominates the thumbnail artwork.
+    Examples:
+      'Bella the blue bus & the fun ride ✨🎶 | 3D Nursery Rhymes' -> 'BLUE BUS!'
+      'Rain, Rain, Go Away | Kids Songs 🌧️' -> 'RAIN RAIN!'
+      'Twinkle Twinkle Little Star ✨' -> 'LITTLE STAR!'
+      'Wheels on the Bus Go Round and Round' -> 'THE BUS!'
+      'Cloud Critters & Rainy Friends' -> 'RAIN RAIN!'
+    """
+    import re
+    raw = (title or topic or "").strip()
+    for sep in ["|", ":", " - ", "—", "(", "["]:
+        if sep in raw:
+            raw = raw.split(sep)[0].strip()
+
+    clean = re.sub(r"[^\w\s&]", " ", raw)
+    words = [w.strip() for w in clean.split() if w.strip()]
+
+    lower_raw = raw.lower()
+    if "bus" in lower_raw:
+        if "blue" in lower_raw:
+            return "BLUE BUS!"
+        return "THE BUS!"
+    if "rain" in lower_raw:
+        return "RAIN RAIN!"
+    if "shark" in lower_raw:
+        return "BABY SHARK!"
+    if "star" in lower_raw:
+        return "LITTLE STAR!"
+    if "monkey" in lower_raw:
+        return "5 MONKEYS!"
+    if "duck" in lower_raw:
+        return "5 DUCKS!"
+    if "dino" in lower_raw:
+        return "DINO FUN!"
+
+    fillers = {
+        "NURSERY", "RHYMES", "RHYME", "PRESCHOOL", "SONGS", "SONG",
+        "FOR", "KIDS", "CHILDREN", "TODDLERS", "BABY", "ANIMATION",
+        "CARTOON", "EPISODE", "3D", "OFFICIAL", "VIDEO", "THE", "AND", "&", "A", "AN"
+    }
+    meaningful = [w for w in words if w.upper() not in fillers]
+
+    if 1 <= len(meaningful) <= 2:
+        return " ".join(meaningful).upper() + "!"
+    elif len(meaningful) >= 3:
+        return " ".join(meaningful[:2]).upper() + "!"
+
+    if words:
+        return " ".join(words[:2]).upper() + "!"
+    return "FUN TIME!"
+
+
+def build_high_ctr_thumbnail_prompt(
+    title: str,
+    topic: str,
+    character_name: str = "Hero",
+    appearance: str = "",
+    environment: str = "",
+) -> str:
+    """
+    Builds an ultra-high CTR 3D Disney Pixar style YouTube thumbnail prompt based on the specific topic.
+    Designed for Midjourney v6, Leonardo, Flux Dev, and DALL-E 3.
+    Strictly specifies NO TEXT / NO WATERMARK so that clean typography can be overlaid.
+    """
+    clean_topic = topic or title or "Preschool Kids Song"
+    for sep in ["|", ":", " - ", "—", "(", "["]:
+        if sep in clean_topic:
+            clean_topic = clean_topic.split(sep)[0].strip()
+
+    clean_lower = clean_topic.lower()
+
+    if "bus" in clean_lower or "wheels" in clean_lower:
+        subject = (
+            "An adorable cheerful 3D cartoon blue preschool bus with big smiling expressive cartoon eyes "
+            "on the windshield, cute friendly face, and rosy cheeks. Happy baby animal passengers (fluffy puppy, smiling bear cub, "
+            "playful bunny) peeking joyfully out of colorful open windows and waving"
+        )
+        setting = (
+            "driving merrily along a winding sunny rainbow hilltop road, colorful blooming flowers, "
+            "puffy soft white clouds, and a bright glowing rainbow arc in a vibrant turquoise sky with a smiling friendly sun"
+        )
+    elif "rain" in clean_lower or "cloud" in clean_lower or "storm" in clean_lower:
+        subject = (
+            "An adorable cute 3D preschool character wearing a glossy bright yellow raincoat and cute rainboots, "
+            "holding a vibrant rainbow-striped umbrella, smiling with big sparkling joyful eyes, splashing playfully in clear puddles"
+        )
+        setting = (
+            "a magical cheerful rain shower with sparkling animated raindrops, a friendly smiling cartoon cloud, "
+            "and a brilliant glowing rainbow arc bursting through warm golden sunshine"
+        )
+    elif "dino" in clean_lower:
+        subject = (
+            "An adorable cute friendly baby 3D cartoon dinosaur with oversized sparkling eyes, "
+            "gentle cheerful smile, and vibrant pastel-colored scales, jumping with pure joy"
+        )
+        setting = (
+            "a lush prehistoric preschool wonderland with giant colorful fantasy flowers, soft rounded hills, "
+            "sparkling waterfalls, and warm sunny golden rim lighting"
+        )
+    elif "farm" in clean_lower or "animal" in clean_lower or "macdonald" in clean_lower:
+        subject = (
+            "A group of adorable cute 3D baby farm animals (smiling baby calf, fluffy yellow chick, playful little lamb) "
+            "dancing and smiling happily together with huge expressive eyes"
+        )
+        setting = (
+            "a sunny green farm meadow in front of a cozy red barn, white picket fences, sunflowers, "
+            "and a radiant blue sky with gentle fluffy clouds"
+        )
+    else:
+        char_desc = appearance or f"cute lovable 3D animated character {character_name}"
+        subject = (
+            f"{char_desc}, smiling happily with big expressive sparkling joyful eyes, rosy cheeks, "
+            "and an energetic excited welcoming pose"
+        )
+        setting = (
+            f"a vibrant magical preschool world themed around {clean_topic}, filled with playful rounded props, "
+            "blooming pastel flowers, sparkling fairy dust, and a glowing colorful rainbow in a sunny sky"
+        )
+
+    prompt = (
+        f"3D Disney Pixar CGI animation style YouTube Kids Thumbnail artwork for \"{clean_topic}\": "
+        f"{subject}. "
+        f"Setting: {setting}. "
+        f"Visual Quality: 8k ultra-detailed CGI render, vibrant saturated preschool candy palette, "
+        f"Unreal Engine 5 aesthetic, soft cinematic sunny rim lighting, volumetric glow, high-CTR YouTube Kids cover composition, "
+        f"strictly NO text, NO words, NO letters, NO watermark, NO logo."
+    )
+    return prompt
+
+
 def generate_high_ctr_thumbnail(
     title: str = "Kids Nursery Rhyme",
     topic: str = "Preschool Song",
@@ -316,107 +478,257 @@ def generate_high_ctr_thumbnail(
     video_path: Optional[str] = None,
     aspect_ratio: str = "16:9",
     character_name: str = "Hero",
+    character_appearance: Optional[str] = None,
+    custom_prompt: Optional[str] = None,
 ) -> str:
     """
-    Generates an ultra-high CTR / high-CPM YouTube Kids thumbnail.
-    Combines video frame (or vibrant 3D Pixar gradient), bold multi-layer 3D typography,
-    eye-catching badges ('NEW EPISODE', 'SING ALONG'), and saturated nursery color palette.
-    Supports 16:9 (1280x720) and 9:16 (1080x1920).
+    Generates an ultra-high CTR / high-CPM 3D Pixar Disney style YouTube Kids Thumbnail.
+    - Topic-aligned AI prompt generation saved to thumbnail_prompt.txt.
+    - AI-generated background (Flux / Fal / Midjourney prompt).
+    - NEVER extracts frames from video scenes (user specification: AI generated only).
+    - Short, punchy 1 to 2 word headline (e.g. 'BLUE BUS!', 'RAIN RAIN!').
+    - Compact, non-intrusive typography that never overpowers or blocks the artwork.
+    - Bottom subtitle badge: Golden-yellow 3D pill badge with topic tag.
     """
+    import math
+    from pathlib import Path
     from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance
 
     os.makedirs(os.path.dirname(os.path.abspath(output_thumbnail_path)), exist_ok=True)
     is_vertical = (aspect_ratio == "9:16")
     width, height = (1080, 1920) if is_vertical else (1280, 720)
 
-    # 1. Base Image: Try extracting frame from video if present
-    base_img = None
-    if video_path and os.path.exists(video_path) and os.path.getsize(video_path) > 1000:
-        temp_frame = output_thumbnail_path + ".raw.jpg"
-        try:
-            generate_thumbnail(video_path, temp_frame)
-            if os.path.exists(temp_frame) and os.path.getsize(temp_frame) > 1000:
-                raw_im = Image.open(temp_frame).convert("RGB")
-                base_img = raw_im.resize((width, height), Image.Resampling.LANCZOS)
-                # Boost saturation & contrast for High-CTR YouTube Kids standard
-                enhancer = ImageEnhance.Color(base_img)
-                base_img = enhancer.enhance(1.35)
-                bright_enh = ImageEnhance.Brightness(base_img)
-                base_img = bright_enh.enhance(1.08)
-                os.remove(temp_frame)
-        except Exception:
-            pass
+    # 1. Build & Save AI Thumbnail Prompt
+    ai_prompt = custom_prompt or build_high_ctr_thumbnail_prompt(
+        title=title,
+        topic=topic,
+        character_name=character_name,
+        appearance=character_appearance or "",
+    )
 
-    # 2. If no video frame, create vibrant Pixar sunset / rainbow gradient canvas
+    # Save prompt to companion text files
+    try:
+        prompt_txt = Path(output_thumbnail_path).parent / "thumbnail_prompt.txt"
+        prompt_txt.write_text(ai_prompt, encoding="utf-8")
+        Path(output_thumbnail_path + ".prompt.txt").write_text(ai_prompt, encoding="utf-8")
+    except Exception as pe:
+        logger.debug(f"Failed to write thumbnail prompt file: {pe}")
+
+    # 2. Try AI Image Generation (Wan / Fal AI / Flux) if API is configured
+    base_img = None
+    try:
+        from ai.image_provider import get_image_provider, NewAIImageProvider
+        img_provider = get_image_provider("ai")
+        if isinstance(img_provider, NewAIImageProvider) and img_provider.api_key and "..." not in img_provider.api_key:
+            temp_ai_path = output_thumbnail_path + ".ai.jpg"
+            if img_provider.generate_image(ai_prompt, temp_ai_path, aspect_ratio=aspect_ratio):
+                if os.path.exists(temp_ai_path) and os.path.getsize(temp_ai_path) > 1000:
+                    raw_im = Image.open(temp_ai_path).convert("RGB")
+                    base_img = raw_im.resize((width, height), Image.Resampling.LANCZOS)
+                    try:
+                        os.remove(temp_ai_path)
+                    except Exception:
+                        pass
+    except Exception as ai_e:
+        logger.debug(f"AI thumbnail background generation skipped: {ai_e}")
+
+    # NOTE: Video frame extraction is STRICTLY EXCLUDED per user specification:
+    # "thumbnil video me se nahi lena hai uska topic ke according genrate krna hai ai se".
+    # Under no circumstances do we sample frames from video_path.
+
+    # 3. If AI generation is offline / pending, create rich 3D Pixar topic-tailored storybook canvas
     if base_img is None:
-        base_img = Image.new("RGB", (width, height), "#1E1B4B")
+        base_img = Image.new("RGB", (width, height), "#0F172A")
         draw_grad = ImageDraw.Draw(base_img)
+        topic_lower = (topic or title or "").lower()
+
+        # Sky gradient: vibrant cerulean to sunny turquoise
         for y in range(height):
             ratio = y / height
-            r = int(255 * (1 - ratio * 0.4))
-            g = int(140 * (1 - ratio * 0.3) + 70 * ratio)
-            b = int(50 * (1 - ratio) + 220 * ratio)
+            r = int(40 * (1 - ratio) + 14 * ratio)
+            g = int(180 * (1 - ratio) + 165 * ratio)
+            b = int(250 * (1 - ratio) + 233 * ratio)
             draw_grad.line([(0, y), (width, y)], fill=(r, g, b))
 
-        # Add decorative bright playful circles
-        draw_grad.ellipse([int(width * 0.7), int(height * 0.05), int(width * 0.98), int(height * 0.45)], fill="#FDE047", outline="#F59E0B", width=8)
-        draw_grad.ellipse([int(width * 0.05), int(height * 0.6), int(width * 0.45), int(height * 1.1)], fill="#10B981", outline="#059669", width=8)
-        draw_grad.ellipse([int(width * 0.4), int(height * 0.7), int(width * 0.95), int(height * 1.2)], fill="#3B82F6", outline="#2563EB", width=8)
+        # Rainbow arc across sky
+        rainbow_colors = ["#EF4444", "#F97316", "#FACC15", "#22C55E", "#3B82F6", "#A855F7"]
+        center_x, center_y = int(width * 0.72), int(height * 0.52)
+        for idx, col in enumerate(rainbow_colors):
+            rad = int(width * 0.44) - idx * 12
+            draw_grad.arc(
+                [center_x - rad, center_y - rad, center_x + rad, center_y + rad],
+                start=160,
+                end=320,
+                fill=col,
+                width=14,
+            )
 
+        # Smiling cartoon sun in top right
+        sun_x, sun_y = int(width * 0.84), int(height * 0.16)
+        sun_r = int(height * 0.11)
+        draw_grad.ellipse([sun_x - sun_r, sun_y - sun_r, sun_x + sun_r, sun_y + sun_r], fill="#FDE047", outline="#F59E0B", width=5)
+        for angle in range(0, 360, 45):
+            rad_ang = math.radians(angle)
+            x1 = sun_x + int((sun_r + 3) * math.cos(rad_ang))
+            y1 = sun_y + int((sun_r + 3) * math.sin(rad_ang))
+            x2 = sun_x + int((sun_r + 18) * math.cos(rad_ang))
+            y2 = sun_y + int((sun_r + 18) * math.sin(rad_ang))
+            draw_grad.line([(x1, y1), (x2, y2)], fill="#F59E0B", width=5)
+
+        # Fluffy white cartoon clouds
+        cloud_color = "#FFFFFF"
+        for cx_rel, cy_rel, cr_rel in [(0.2, 0.22, 0.08), (0.26, 0.20, 0.10), (0.33, 0.22, 0.08)]:
+            ccx, ccy, ccr = int(width * cx_rel), int(height * cy_rel), int(height * cr_rel)
+            draw_grad.ellipse([ccx - ccr, ccy - ccr, ccx + ccr, ccy + ccr], fill=cloud_color)
+
+        # Lush rolling preschool hills
+        draw_grad.ellipse([int(width * -0.1), int(height * 0.60), int(width * 0.58), int(height * 1.35)], fill="#15803D", outline="#166534", width=6)
+        draw_grad.ellipse([int(width * 0.42), int(height * 0.66), int(width * 1.15), int(height * 1.38)], fill="#16A34A", outline="#15803D", width=6)
+        draw_grad.ellipse([int(width * 0.12), int(height * 0.74), int(width * 0.88), int(height * 1.42)], fill="#22C55E", outline="#16A34A", width=6)
+
+        # If vehicle / bus topic: Draw winding sunny road
+        if "bus" in topic_lower or "wheel" in topic_lower or "car" in topic_lower or "ride" in topic_lower:
+            draw_grad.ellipse([int(width * 0.05), int(height * 0.78), int(width * 0.95), int(height * 1.45)], fill="#334155", outline="#64748B", width=6)
+            # Dashed yellow road centerline
+            for dash_x in range(int(width * 0.15), int(width * 0.85), int(width * 0.06)):
+                draw_grad.line([(dash_x, int(height * 0.88)), (dash_x + int(width * 0.03), int(height * 0.88))], fill="#FACC15", width=5)
+
+    # 4. Pixar 3D Bubble Typography Overlay (Compact & High-CTR)
     draw = ImageDraw.Draw(base_img, "RGBA")
 
-    # 3. High-CTR Glowing Vignette Border
-    border_w = 16 if not is_vertical else 24
-    for i in range(border_w):
-        alpha = int(220 * (1 - i / border_w))
-        draw.rectangle([i, i, width - i, height - i], outline=(255, 220, 0, alpha), width=1)
+    # Short, punchy headline (1 to 2 words max)
+    short_title = extract_short_thumbnail_title(title, topic)
+    words = short_title.split()
+    if len(words) >= 3:
+        line1 = " ".join(words[:2])
+        line2 = " ".join(words[2:])
+    else:
+        line1 = short_title
+        line2 = ""
 
-    # 4. Top-Left High-CPM Badge ('★ POPULAR KIDS SONG ★' or '🔥 NEW EPISODE')
-    badge_w = 340 if not is_vertical else 420
-    badge_h = 56 if not is_vertical else 72
-    badge_x = 36
-    badge_y = 36
-    draw.rounded_rectangle([badge_x, badge_y, badge_x + badge_w, badge_y + badge_h], radius=18, fill=(239, 68, 68, 245), outline=(255, 255, 255, 255), width=4)
+    # Helper to draw compact 3D Pixar Bubble Text with vibrant multi-layer effects
+    def draw_3d_bubble(
+        text: str,
+        cx: int,
+        cy: int,
+        font,
+        fill_color="#00D4FF",
+        gradient_bottom="#0077FF",
+        inner_stroke="#004499",
+        border_color="#FFFFFF",
+        border_radius=8,
+        shadow_offset=(4, 5),
+        shadow_color=(0, 15, 45, 220),
+        add_sparkles=True,
+    ):
+        if not text:
+            return
+        bbox = draw.textbbox((0, 0), text, font=font)
+        tw = bbox[2] - bbox[0]
+        th = bbox[3] - bbox[1]
+        tx = cx - tw // 2
+        ty = cy - th // 2
 
-    # Text overlay
-    badge_text = "🔥 NEW PRESCHOOL HIT!"
-    draw.text((badge_x + 24, badge_y + 12), badge_text, fill="#FFFFFF")
+        # 1. Deep 3D Extruded Drop Shadow
+        sox, soy = shadow_offset
+        for s_step in range(soy, 0, -1):
+            draw.text((tx + sox, ty + s_step), text, fill=shadow_color, font=font)
 
-    # Top-Right Badge ('4K ULTRA HD')
-    tr_w = 180 if not is_vertical else 220
-    tr_x = width - tr_w - 36
-    draw.rounded_rectangle([tr_x, badge_y, tr_x + tr_w, badge_y + badge_h], radius=18, fill=(37, 99, 235, 245), outline=(255, 255, 255, 255), width=4)
-    draw.text((tr_x + 28, badge_y + 12), "⭐ 4K KIDS", fill="#FFFFFF")
+        # 2. Sleek Rounded White Puffy Casing
+        for r in range(border_radius, 0, -2):
+            for angle in range(0, 360, 20):
+                rad = math.radians(angle)
+                ox = int(r * math.cos(rad))
+                oy = int(r * math.sin(rad))
+                draw.text((tx + ox, ty + oy), text, fill=border_color, font=font)
 
-    # 5. Bold 3D Multi-Layered Title Banner (Bottom Hook for High Click-Through Rate)
-    clean_title = title.split(":")[0].strip() if ":" in title else title.strip()
-    if len(clean_title) > 32:
-        clean_title = clean_title[:30] + "..."
+        # 3. Inner Contrast Stroke
+        for ox, oy in [(-2, -2), (2, -2), (-2, 2), (2, 2), (0, 2), (0, -2), (2, 0), (-2, 0)]:
+            draw.text((tx + ox, ty + oy), text, fill=inner_stroke, font=font)
 
-    banner_h = int(height * 0.28)
-    banner_y = height - banner_h - 28
-    banner_x1 = 28
-    banner_x2 = width - 28
+        # 4. Bottom Depth Tone
+        draw.text((tx, ty + 2), text, fill=gradient_bottom, font=font)
 
-    # Dark translucent backdrop for maximum text readability
-    draw.rounded_rectangle([banner_x1, banner_y, banner_x2, banner_y + banner_h], radius=24, fill=(15, 23, 42, 215), outline=(250, 204, 21, 255), width=6)
+        # 5. Main Vibrant Candy Fill
+        draw.text((tx, ty), text, fill=fill_color, font=font)
 
-    # Draw Title with 3D drop shadow effect
-    text_x = banner_x1 + 32
-    text_y = banner_y + 24
+        # 6. Top Glossy Specular Arc Reflection
+        draw.text((tx - 1, ty - 1), text, fill="#FFFFFF", font=font)
+        draw.text((tx, ty - 1), text, fill="#E0F7FF", font=font)
 
-    # Subtitle hook
-    hook_text = f"Sing Along with {character_name}! 🎈"
-    draw.text((text_x, text_y), hook_text, fill="#38BDF8")
+        # 7. Decorative 3D Sparkle Stars around text
+        if add_sparkles:
+            sparkle_font = _get_best_font(size=int(font.size * 0.4), bold=True)
+            draw.text((tx - 18, ty - 10), "✦", fill="#FFF59D", font=sparkle_font)
+            draw.text((tx + tw + 4, ty - 8), "✦", fill="#FFF59D", font=sparkle_font)
 
-    # Main Headline in Big 3D Yellow / White
-    headline = clean_title.upper()
-    for offset_x, offset_y in [(4, 4), (3, 3), (2, 2), (-2, -2), (2, -2), (-2, 2)]:
-        draw.text((text_x + offset_x, text_y + 42 + offset_y), headline, fill="#000000")
+    # Compact Headline Font Sizing (Does NOT overpower artwork)
+    title_size = 46 if not is_vertical else 54
+    if len(line1) <= 8 and not line2:
+        title_size = 50 if not is_vertical else 58
 
-    draw.text((text_x, text_y + 42), headline, fill="#FDE047")
+    title_font = _get_best_font(size=title_size, bold=True)
+    title_center_x = width // 2
 
-    # Save final thumbnail JPEG
+    if line2:
+        draw_3d_bubble(
+            line1, title_center_x, int(height * 0.12), title_font,
+            fill_color="#00E5FF", gradient_bottom="#0080FF", inner_stroke="#003D82",
+            border_radius=8, add_sparkles=True,
+        )
+        draw_3d_bubble(
+            line2, title_center_x, int(height * 0.22), title_font,
+            fill_color="#FFE600", gradient_bottom="#FF8800", inner_stroke="#B34700",
+            border_radius=8, shadow_color=(40, 10, 0, 220), add_sparkles=True,
+        )
+    else:
+        draw_3d_bubble(
+            line1, title_center_x, int(height * 0.14), title_font,
+            fill_color="#00E5FF", gradient_bottom="#0080FF", inner_stroke="#003D82",
+            border_radius=8, add_sparkles=True,
+        )
+
+    # 5. Bottom Subtitle Compact 3D Pill Badge
+    clean_topic = topic.split(":")[0].split("|")[0].strip() if topic else "Preschool Song"
+    if clean_topic.lower() in ("preschool song", "nursery rhymes", "kids song"):
+        subtitle_text = "Fun Kids Song 🎶"
+    else:
+        subtitle_text = f"{clean_topic[:26]} 🎶"
+
+    badge_font_size = 24 if not is_vertical else 28
+    badge_font = _get_best_font(size=badge_font_size, bold=True)
+    sub_cy = int(height * 0.92) if not is_vertical else int(height * 0.95)
+    sub_cx = width // 2
+
+    # Draw Compact Golden Pill Badge
+    def draw_golden_pill_badge(text: str, cx: int, cy: int, font):
+        full_text = f"✨  {text}  ✨"
+        bbox = draw.textbbox((0, 0), full_text, font=font)
+        tw = bbox[2] - bbox[0]
+        th = bbox[3] - bbox[1]
+
+        pad_x, pad_y = 18, 6
+        rx0, ry0 = cx - tw // 2 - pad_x, cy - th // 2 - pad_y
+        rx1, ry1 = cx + tw // 2 + pad_x, cy + th // 2 + pad_y
+        radius = (ry1 - ry0) // 2
+
+        # 1. Pill Drop Shadow
+        draw.rounded_rectangle([rx0 + 2, ry0 + 4, rx1 + 2, ry1 + 4], radius=radius, fill=(0, 0, 0, 150))
+        # 2. Outer White Stroke
+        draw.rounded_rectangle([rx0 - 2, ry0 - 2, rx1 + 2, ry1 + 2], radius=radius + 2, fill="#FFFFFF")
+        # 3. Main Gradient Fill
+        draw.rounded_rectangle([rx0, ry0, rx1, ry1], radius=radius, fill="#FFB300", outline="#E65100", width=2)
+        # 4. Top Highlight
+        draw.rounded_rectangle([rx0 + 3, ry0 + 2, rx1 - 3, ry0 + (ry1 - ry0) // 2], radius=radius // 2, fill="#FFE082")
+        # 5. Text
+        tx = cx - tw // 2
+        ty = cy - th // 2
+        draw.text((tx + 1, ty + 1), full_text, fill=(80, 20, 0, 200), font=font)
+        draw.text((tx, ty), full_text, fill="#1A1A1A", font=font)
+
+    draw_golden_pill_badge(subtitle_text, sub_cx, sub_cy, badge_font)
+
+    # 6. Save final high-CTR thumbnail JPEG
     base_img = base_img.convert("RGB")
-    base_img.save(output_thumbnail_path, format="JPEG", quality=94, optimize=True)
+    base_img.save(output_thumbnail_path, format="JPEG", quality=96, optimize=True)
     return output_thumbnail_path

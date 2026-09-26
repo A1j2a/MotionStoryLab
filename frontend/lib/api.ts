@@ -15,6 +15,7 @@ import {
   SeoData,
   ServiceToolItem,
   SunoPromptPackage,
+  AssemblyReadiness,
 } from "./types";
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
@@ -107,6 +108,17 @@ export const api = {
     thumbnail_model?: string;
     thumbnail_aspect_ratio?: string;
     auto_song_generation_enabled?: boolean;
+    channel_logo_enabled?: boolean;
+    channel_logo_position?: string;
+    channel_logo_opacity?: number;
+    channel_logo_scale?: number;
+    channel_logo_bottom_spacing?: number;
+    intro_enabled?: boolean;
+    outro_enabled?: boolean;
+    scene_audio_volume?: number;
+    song_audio_volume?: number;
+    burn_subtitles?: boolean;
+    subtitle_font_size?: number;
   }) =>
     request<AISettings>("/api/v1/settings/ai", {
       method: "POST",
@@ -117,6 +129,57 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+
+  // Channel Logo / Watermark Upload & Management
+  uploadChannelLogo: async (file: File) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    const res = await fetch(`${API_BASE}/api/v1/settings/logo/upload`, {
+      method: "POST",
+      body: formData,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: "Logo upload failed" }));
+      throw new Error(err.detail || "Logo upload failed");
+    }
+    return res.json();
+  },
+  deleteChannelLogo: () =>
+    request<{ status: string; message: string }>("/api/v1/settings/logo", { method: "DELETE" }),
+
+  // Intro Video Clip Upload & Management
+  uploadIntroClip: async (file: File) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    const res = await fetch(`${API_BASE}/api/v1/settings/intro/upload`, {
+      method: "POST",
+      body: formData,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: "Intro upload failed" }));
+      throw new Error(err.detail || "Intro upload failed");
+    }
+    return res.json();
+  },
+  deleteIntroClip: () =>
+    request<{ status: string; message: string }>("/api/v1/settings/intro", { method: "DELETE" }),
+
+  // Outro Video Clip Upload & Management
+  uploadOutroClip: async (file: File) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    const res = await fetch(`${API_BASE}/api/v1/settings/outro/upload`, {
+      method: "POST",
+      body: formData,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: "Outro upload failed" }));
+      throw new Error(err.detail || "Outro upload failed");
+    }
+    return res.json();
+  },
+  deleteOutroClip: () =>
+    request<{ status: string; message: string }>("/api/v1/settings/outro", { method: "DELETE" }),
 
   // Step 1: Topics Discovery & Selection with Filters
   discoverTopics: (options?: number | { limit?: number; target_age?: string; duration?: string; language?: string; seed?: number }) => {
@@ -271,12 +334,12 @@ export const api = {
       method: "POST",
     }),
   generateManualSeo: (projectId: string, topic?: string) =>
-    request<{ title: string; description: string; tags: string; caption: string }>(
+    request<{ title: string; description: string; tags: string; caption: string; thumbnail_prompt?: string; thumbnail_url?: string }>(
       `/api/v1/projects/${projectId}/seo/generate`,
       { method: "POST", body: JSON.stringify({ topic }) }
     ),
   getManualSeo: (projectId: string) =>
-    request<{ title: string; description: string; tags: string; caption: string }>(
+    request<{ title: string; description: string; tags: string; caption: string; thumbnail_prompt?: string; thumbnail_url?: string }>(
       `/api/v1/projects/${projectId}/seo`
     ),
 
@@ -389,13 +452,17 @@ export const api = {
     ),
   // Thumbnail Generation
   generateThumbnail: (projectId: string, payload?: { aspect_ratio?: string; prompt_override?: string }) =>
-    request<{ status: string; thumbnail_url: string; aspect_ratio: string; message: string }>(
+    request<{ status: string; thumbnail_url: string; aspect_ratio: string; thumbnail_prompt?: string; message: string }>(
       `/api/v1/projects/${projectId}/thumbnail/generate`,
       {
         method: "POST",
         body: JSON.stringify(payload || { aspect_ratio: "16:9" }),
       },
       60000
+    ),
+  getThumbnailPrompt: (projectId: string) =>
+    request<{ project_id: string; prompt: string }>(
+      `/api/v1/projects/${projectId}/thumbnail/prompt`
     ),
 
   // Thumbnail AI Test
@@ -483,6 +550,36 @@ export const api = {
     return res.json();
   },
 
+  aiMatchVideos: (projectId: string) =>
+    request<{
+      matches: Array<{
+        filename: string;
+        tmp_path: string;
+        suggested_scene_number: number;
+        confidence: number;
+        match_reason: string;
+        match_source: string;
+        scene_prompt_preview: string;
+        scene_lyrics_preview: string;
+      }>;
+      unresolved_count: number;
+      total_scenes: number;
+    }>(`/api/v1/projects/${projectId}/scenes/ai-match-videos`, { method: "POST" }),
+
+  autoAssignSmart: (
+    projectId: string,
+    assignments?: Array<{ tmp_path: string; scene_number: number; reason?: string }>
+  ) =>
+    request<{
+      status: string;
+      assigned_count: number;
+      details: Array<{ scene_number: number; filename: string; duration?: number; reason: string }>;
+      message: string;
+    }>(`/api/v1/projects/${projectId}/scenes/auto-assign-smart`, {
+      method: "POST",
+      body: assignments ? JSON.stringify({ assignments }) : undefined,
+    }),
+
   confirmSceneSequence: (projectId: string, sceneOrder: number[]) =>
     request<{ confirmed: boolean; sequence: number[]; message: string }>(
       `/api/v1/projects/${projectId}/scenes/confirm-sequence`,
@@ -490,15 +587,7 @@ export const api = {
     ),
 
   checkAssemblyReadiness: (projectId: string) =>
-    request<{
-      ready: boolean;
-      total_scenes: number;
-      uploaded_scenes: number;
-      missing_scenes: number[];
-      audio_available: boolean;
-      srt_available: boolean;
-      sequence_confirmed: boolean;
-    }>(`/api/v1/projects/${projectId}/assembly/readiness`),
+    request<AssemblyReadiness>(`/api/v1/projects/${projectId}/assembly/readiness`),
 
   generateFinalVideoFromUploads: (projectId: string) =>
     request<{ status: string; final_video: string; duration: number; message: string }>(

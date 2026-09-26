@@ -11,6 +11,10 @@ from app.schemas.scene import SceneRead, SceneUpdate, SceneCreate
 router = APIRouter(prefix="/scenes", tags=["scenes"])
 
 
+from pathlib import Path
+from app.core.config import settings
+
+
 @router.get("/project/{project_id}", response_model=List[SceneRead])
 async def list_scenes_for_project(
     project_id: str,
@@ -23,7 +27,35 @@ async def list_scenes_for_project(
             detail=f"Project '{project_id}' not found",
         )
     scene_repo = SceneRepository(session)
-    return await scene_repo.list_by_project(project_id)
+    scenes = await scene_repo.list_by_project(project_id)
+
+    # Auto-heal: If physical clips exist in uploaded_scenes for scenes lacking uploaded_file
+    uploaded_scenes_dir = Path(str(settings.resolved_project_dir)) / project_id / "uploaded_scenes"
+    db_healed = False
+    if uploaded_scenes_dir.exists():
+        for s in scenes:
+            if not (s.uploaded_file and Path(s.uploaded_file).exists()):
+                candidates = [
+                    uploaded_scenes_dir / f"scene_{s.scene_number:03d}.mp4",
+                    uploaded_scenes_dir / f"scene_{s.scene_number:02d}.mp4",
+                    uploaded_scenes_dir / f"scene_{s.scene_number}.mp4",
+                    uploaded_scenes_dir / f"scene_{s.scene_number:03d}.mov",
+                    uploaded_scenes_dir / f"scene_{s.scene_number:02d}.mov",
+                    uploaded_scenes_dir / f"scene_{s.scene_number}.mov",
+                    uploaded_scenes_dir / f"scene_{s.scene_number:03d}.webm",
+                    uploaded_scenes_dir / f"scene_{s.scene_number:02d}.webm",
+                    uploaded_scenes_dir / f"scene_{s.scene_number}.webm",
+                ]
+                for cand in candidates:
+                    if cand.exists():
+                        s.uploaded_file = str(cand)
+                        s.prompt_status = "VIDEO_UPLOADED"
+                        db_healed = True
+                        break
+        if db_healed:
+            await session.commit()
+
+    return scenes
 
 
 @router.get("/{scene_id}", response_model=SceneRead)

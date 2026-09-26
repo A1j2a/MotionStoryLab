@@ -1,4 +1,5 @@
 import os
+import asyncio
 from typing import List, Optional, Dict, Any
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query, status, BackgroundTasks
@@ -66,8 +67,8 @@ async def create_project(
         )
     )
 
-    # 3. Automatically launch the video generation pipeline in the background
-    background_tasks.add_task(run_project_pipeline, created.id)
+    # 3. Launch the video generation pipeline safely in the background
+    asyncio.create_task(run_project_pipeline(created.id))
 
     return created
 
@@ -105,11 +106,14 @@ async def get_project_video(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    video_path = os.path.join(str(settings.resolved_project_dir), project_id, "final.mp4")
-    if not os.path.exists(video_path):
-        raise HTTPException(status_code=404, detail="Video rendering not yet complete")
+    project_dir = Path(str(settings.resolved_project_dir)) / project_id
+    video_path = project_dir / "output" / "final_video.mp4"
+    if not video_path.exists():
+        video_path = project_dir / "final.mp4"
+    if not video_path.exists():
+        raise HTTPException(status_code=404, detail="Video rendering or assembly not yet complete")
 
-    return FileResponse(video_path, media_type="video/mp4", filename=f"{project.title}.mp4")
+    return FileResponse(str(video_path), media_type="video/mp4", filename=f"{project.title}.mp4")
 
 
 @router.get("/{project_id}/thumbnail")
@@ -122,11 +126,59 @@ async def get_project_thumbnail(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    thumb_path = os.path.join(str(settings.resolved_project_dir), project_id, "thumbnail.jpg")
-    if not os.path.exists(thumb_path):
+    project_dir = Path(str(settings.resolved_project_dir)) / project_id
+    project_dir.mkdir(parents=True, exist_ok=True)
+    thumb_path = project_dir / "thumbnail.jpg"
+
+    if not thumb_path.exists():
+        from renderer.compositor import generate_high_ctr_thumbnail
+        from app.models.character import Character
+        from app.models.asset import Asset
+        import asyncio
+
+        meta = project.metadata_json or {}
+        seo = meta.get("manual_seo") or {}
+        title = seo.get("title") or project.title or project.topic or "Preschool Kids Song"
+        topic = project.topic or project.title or "Nursery Rhymes"
+
+        char_res = await session.execute(select(Character).where(Character.project_id == project_id))
+        chars = char_res.scalars().all()
+        char_name = chars[0].name if chars else "Preschool Hero"
+
+        sample_video = None
+        for cand in [project_dir / "output" / "final_video.mp4", project_dir / "final.mp4"]:
+            if cand.exists():
+                sample_video = str(cand)
+                break
+        if not sample_video:
+            uploaded_clips = list((project_dir / "uploaded_scenes").glob("scene_*.mp4"))
+            if uploaded_clips:
+                sample_video = str(uploaded_clips[0])
+
+        try:
+            await asyncio.to_thread(
+                generate_high_ctr_thumbnail,
+                title=title,
+                topic=topic,
+                output_thumbnail_path=str(thumb_path),
+                video_path=sample_video,
+                aspect_ratio="16:9",
+                character_name=char_name,
+            )
+            asset_res = await session.execute(select(Asset).where(Asset.project_id == project_id, Asset.asset_type == "thumbnail"))
+            existing_asset = asset_res.scalars().first()
+            if not existing_asset:
+                session.add(Asset(project_id=project_id, asset_type="thumbnail", file_path=str(thumb_path)))
+            else:
+                existing_asset.file_path = str(thumb_path)
+            await session.commit()
+        except Exception as e:
+            logger.warning(f"On-demand thumbnail generation failed: {e}")
+
+    if not thumb_path.exists():
         raise HTTPException(status_code=404, detail="Thumbnail not yet generated")
 
-    return FileResponse(thumb_path, media_type="image/jpeg", filename="thumbnail.jpg")
+    return FileResponse(str(thumb_path), media_type="image/jpeg", filename="thumbnail.jpg")
 
 
 @router.get("/{project_id}/seo")

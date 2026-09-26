@@ -26,6 +26,8 @@ import {
   ListOrdered,
   X,
   ExternalLink,
+  ImageIcon,
+  Upload,
 } from "lucide-react";
 
 interface StoryboardViewProps {
@@ -58,32 +60,79 @@ export function StoryboardView({
   const [copyStatus, setCopyStatus] = useState<{ total_scenes: number; copied_count: number; uploaded_count: number } | null>(null);
   const [uploadingVideos, setUploadingVideos] = useState(false);
   const [dragOver, setDragOver] = useState(false);
-  const [unresolved, setUnresolved] = useState<Array<{ filename: string; tmp_path: string; duration?: number }>>([]);
+  const [unresolved, setUnresolved] = useState<
+    Array<{
+      filename: string;
+      tmp_path: string;
+      duration?: number;
+      suggested_scene_number?: number;
+      confidence?: number;
+      match_reason?: string;
+      match_source?: string;
+    }>
+  >([]);
   const [fileSceneMap, setFileSceneMap] = useState<Record<string, number>>({});
   const [autoAssigning, setAutoAssigning] = useState(false);
+  const [aiMatching, setAiMatching] = useState(false);
   const [sequenceConfirmed, setSequenceConfirmed] = useState(false);
   const [confirmingSequence, setConfirmingSequence] = useState(false);
   const [assembling, setAssembling] = useState(false);
   const [finalVideoResult, setFinalVideoResult] = useState<{ status: string; final_video: string; duration: number } | null>(null);
   const [assembleError, setAssembleError] = useState<string | null>(null);
 
+  const handleRunAiMatch = async () => {
+    if (!projectId) return;
+    setAiMatching(true);
+    try {
+      const res = await api.aiMatchVideos(projectId);
+      if (res.matches && res.matches.length > 0) {
+        setUnresolved((prev) =>
+          prev.map((item) => {
+            const match = res.matches.find(
+              (m) => m.filename === item.filename || m.tmp_path === item.tmp_path
+            );
+            if (match) {
+              return {
+                ...item,
+                suggested_scene_number: match.suggested_scene_number,
+                confidence: match.confidence,
+                match_reason: match.match_reason,
+                match_source: match.match_source,
+              };
+            }
+            return item;
+          })
+        );
+        const newMap: Record<string, number> = {};
+        res.matches.forEach((m) => {
+          if (m.tmp_path) newMap[m.tmp_path] = m.suggested_scene_number;
+        });
+        setFileSceneMap((prev) => ({ ...prev, ...newMap }));
+      }
+    } catch (err: any) {
+      alert("AI Matching failed: " + (err?.message || err));
+    } finally {
+      setAiMatching(false);
+    }
+  };
+
   const handleAutoAssignAll = async () => {
     if (!unresolved.length || !projectId) return;
     setAutoAssigning(true);
     try {
-      const remainingScenes = scenes.filter((s) => !s.uploaded_file).map((s) => s.scene_number);
-      for (let i = 0; i < unresolved.length; i++) {
-        const u = unresolved[i];
-        const targetSceneNum = fileSceneMap[u.tmp_path] || (remainingScenes[i] ?? (i + 1));
-        await api.assignUnresolvedVideo(projectId, targetSceneNum, u.tmp_path);
-      }
+      const assignments = unresolved.map((u) => ({
+        tmp_path: u.tmp_path,
+        scene_number: fileSceneMap[u.tmp_path] ?? u.suggested_scene_number ?? 1,
+        reason: u.match_reason,
+      }));
+      await api.autoAssignSmart(projectId, assignments);
       setUnresolved([]);
       const updated = await api.getScenes(projectId);
       if (onScenesUpdated) onScenesUpdated(updated);
       const st = await api.getCopyStatus(projectId);
       setCopyStatus(st);
     } catch (err: any) {
-      alert("Auto-assign failed: " + (err?.message || err));
+      alert("Smart AI assign failed: " + (err?.message || err));
     } finally {
       setAutoAssigning(false);
     }
@@ -93,6 +142,41 @@ export function StoryboardView({
     api.getAISettings().then(setAiSettings).catch(() => {});
     if (projectId) {
       api.getCopyStatus(projectId).then(setCopyStatus).catch(() => {});
+      api.checkAssemblyReadiness(projectId).then((readyData) => {
+        if (readyData.final_video_exists) {
+          setFinalVideoResult({
+            status: "completed",
+            final_video: readyData.final_video_url || `${API_BASE}/api/v1/projects/${projectId}/assembly/final-video`,
+            duration: readyData.final_video_duration || 0,
+          });
+        } else {
+          setFinalVideoResult(null);
+        }
+
+        if (readyData.unresolved_count && readyData.unresolved_count > 0) {
+          api.aiMatchVideos(projectId).then((matchRes) => {
+            if (matchRes.matches && matchRes.matches.length > 0) {
+              setUnresolved(
+                matchRes.matches.map((m) => ({
+                  filename: m.filename,
+                  tmp_path: m.tmp_path,
+                  suggested_scene_number: m.suggested_scene_number,
+                  confidence: m.confidence,
+                  match_reason: m.match_reason,
+                  match_source: m.match_source,
+                }))
+              );
+              const newMap: Record<string, number> = {};
+              matchRes.matches.forEach((m) => {
+                if (m.tmp_path) newMap[m.tmp_path] = m.suggested_scene_number;
+              });
+              setFileSceneMap((prev) => ({ ...prev, ...newMap }));
+            }
+          }).catch(() => {});
+        } else {
+          setUnresolved([]);
+        }
+      }).catch(() => {});
     }
   }, [projectId]);
 
@@ -551,18 +635,117 @@ ${prompt}`;
       {/* MANUAL WORKFLOW: VIDEO UPLOAD, SEQUENCE & ASSEMBLY          */}
       {/* ───────────────────────────────────────────────────────────── */}
       <div className="pt-6 border-t border-[#E5E5EA] space-y-6">
-        <div className="space-y-1">
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-indigo-50 text-indigo-800 border border-indigo-200">
-            <UploadCloud className="w-3.5 h-3.5 text-indigo-600" />
-            <span>Step 6 to 8 • Upload External AI Videos & Assemble</span>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-[#E5E5EA]">
+          <div className="space-y-1">
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-indigo-50 text-indigo-800 border border-indigo-200">
+              <UploadCloud className="w-3.5 h-3.5 text-indigo-600" />
+              <span>Step 6 to 8 • Upload External AI Videos & Assemble</span>
+            </div>
+            <h3 className="text-base font-bold text-[#1D1D1F]">
+              Upload Generated Scene Videos & Assemble Final Video
+            </h3>
+            <p className="text-xs text-[#6E6E73]">
+              Generated scenes in Google Flow / Kling / Runway? Upload your MP4/MOV clips here for automatic FFmpeg assembly.
+            </p>
           </div>
-          <h3 className="text-base font-bold text-[#1D1D1F]">
-            Upload Generated Scene Videos & Assemble Final Video
-          </h3>
-          <p className="text-xs text-[#6E6E73]">
-            Generated scenes in Google Flow / Kling / Runway? Upload your MP4/MOV clips here for automatic FFmpeg assembly.
-          </p>
+
+        {/* Persistent status badge */}
+          <div className="flex items-center gap-2">
+            {scenes.length > 0 && scenes.every(s => !!s.uploaded_file) ? (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-2xs">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                <span>{scenes.filter(s => !!s.uploaded_file).length}/{scenes.length} Uploaded (100% Ready)</span>
+              </span>
+            ) : scenes.some(s => !!s.uploaded_file) ? (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-100 text-amber-900 border border-amber-300 shadow-2xs">
+                <AlertTriangle className="w-4 h-4 text-amber-600" />
+                <span>{scenes.filter(s => !!s.uploaded_file).length}/{scenes.length} Uploaded ({scenes.filter(s => !s.uploaded_file).length} Missing)</span>
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200">
+                <Upload className="w-4 h-4 text-slate-500" />
+                <span>0/{scenes.length} Uploaded</span>
+              </span>
+            )}
+          </div>
         </div>
+
+        {/* Real-time Scene Slot Occupancy Ribbon */}
+        {scenes.length > 0 && (
+          <div className={`rounded-2xl p-4 border transition-all ${
+            scenes.every(s => !!s.uploaded_file)
+              ? "bg-emerald-50/70 border-emerald-300 text-emerald-950 shadow-2xs"
+              : scenes.some(s => !!s.uploaded_file)
+              ? "bg-amber-50/70 border-amber-300 text-amber-950"
+              : "bg-slate-50 border-slate-200 text-slate-700"
+          }`}>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2.5 border-b border-black/5 text-xs">
+              <span className="font-bold flex items-center gap-1.5">
+                <ListOrdered className="w-4 h-4 text-indigo-600" />
+                <span>Scene Video Slots ({scenes.filter(s => !!s.uploaded_file).length}/{scenes.length} Assigned)</span>
+              </span>
+              <span className="text-[11px] font-bold">
+                {scenes.every(s => !!s.uploaded_file)
+                  ? "🎉 All scene slots have video clips assigned! Ready for final assembly below."
+                  : `⚠️ ${scenes.filter(s => !s.uploaded_file).length} scene slot(s) missing video files: Scenes ${scenes.filter(s => !s.uploaded_file).map(s => String(s.scene_number).padStart(2, "0")).join(", ")}`}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-9 gap-2.5 pt-3">
+              {scenes.map((s) => {
+                const hasFile = !!s.uploaded_file;
+                const fileName = s.uploaded_file ? s.uploaded_file.split("/").pop() : null;
+                const dur = s.uploaded_duration || s.duration || 0;
+                return (
+                  <div
+                    key={s.id}
+                    title={hasFile ? `Scene ${s.scene_number}: Assigned (${fileName} - ${dur.toFixed(1)}s)` : `Scene ${s.scene_number}: Vacant - upload or assign video clip`}
+                    className={`p-2.5 rounded-xl text-center flex flex-col items-center justify-between gap-1.5 border-2 transition-all min-h-[76px] ${
+                      hasFile
+                        ? "bg-white border-emerald-500 text-emerald-950 shadow-xs"
+                        : "bg-amber-50/60 border-dashed border-amber-400 text-amber-900"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between w-full">
+                      <span className="text-[11px] font-black tracking-tight">
+                        Scene {String(s.scene_number).padStart(2, "0")}
+                      </span>
+                      {hasFile ? (
+                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-black bg-emerald-100 text-emerald-800 border border-emerald-300">
+                          <Check className="w-2.5 h-2.5 text-emerald-600" />
+                          <span>Ready</span>
+                        </span>
+                      ) : (
+                        <span className="px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-amber-100 text-amber-800 border border-amber-300">
+                          ⚡ Vacant
+                        </span>
+                      )}
+                    </div>
+                    {hasFile ? (
+                      <div className="w-full flex flex-col items-center">
+                        <span className="text-[10px] font-mono font-bold text-slate-700 truncate w-full" title={fileName || ""}>
+                          🎬 {fileName}
+                        </span>
+                        <span className="text-[9px] font-semibold text-emerald-700">
+                          ⏱️ {dur.toFixed(1)}s
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="w-full text-center">
+                        <span className="text-[10px] font-medium text-amber-700 block">
+                          No Video
+                        </span>
+                        <span className="text-[9px] text-amber-500">
+                          Slot empty
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Drag & Drop Box */}
         <div
@@ -576,9 +759,12 @@ ${prompt}`;
             try {
               const res = await api.batchUploadScenes(projectId, Array.from(e.dataTransfer.files));
               setUnresolved(res.unresolved || []);
-              const updated = await api.getScenes(projectId);
+              const [updated, st, readyData] = await Promise.all([
+                api.getScenes(projectId),
+                api.getCopyStatus(projectId),
+                api.checkAssemblyReadiness(projectId).catch(() => null),
+              ]);
               if (onScenesUpdated) onScenesUpdated(updated);
-              const st = await api.getCopyStatus(projectId);
               setCopyStatus(st);
             } catch (err: any) {
               alert("Upload failed: " + (err?.message || err));
@@ -630,65 +816,204 @@ ${prompt}`;
           </div>
         </div>
 
-        {/* Unresolved files manual assignment */}
+        {/* Unresolved files smart AI matching & assignment */}
         {unresolved.length > 0 && (
-          <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 space-y-3">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <p className="text-xs font-bold text-amber-900 flex items-center gap-1.5">
-                <AlertTriangle className="w-4 h-4 text-amber-600" />
-                <span>Unresolved Filenames ({unresolved.length} clips) — Auto or Manual Assign:</span>
-              </p>
-              <button
-                type="button"
-                onClick={handleAutoAssignAll}
-                disabled={autoAssigning}
-                className="inline-flex items-center gap-1 px-3 py-1.5 bg-gradient-to-r from-orange-500 to-amber-600 hover:opacity-90 text-white rounded-xl text-xs font-bold shadow-xs cursor-pointer disabled:opacity-50"
-              >
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>{autoAssigning ? "Assigning..." : "⚡ Auto-Assign All in Order (1 → N)"}</span>
-              </button>
+          <div className="bg-gradient-to-br from-indigo-50/70 via-orange-50/50 to-amber-50/80 border border-orange-200/80 rounded-2xl p-4 space-y-3.5 shadow-2xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2 border-b border-orange-200/50">
+              <div className="space-y-0.5">
+                <p className="text-xs font-bold text-[#1D1D1F] flex items-center gap-1.5">
+                  <Sparkles className="w-4 h-4 text-[#FF6B00]" />
+                  <span>AI Scene Matcher ({unresolved.length} clips uploaded)</span>
+                </p>
+                <p className="text-[11px] text-[#6E6E73]">
+                  AI automatically matches video titles and keywords with each scene's visual prompt &amp; lyrics.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleRunAiMatch}
+                  disabled={aiMatching}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-xs transition-all cursor-pointer disabled:opacity-50"
+                  title="Run AI to compare filenames against scene prompts and generate recommendations"
+                >
+                  {aiMatching ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                  <span>{aiMatching ? "Matching with AI…" : "Re-Match with AI"}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleAutoAssignAll}
+                  disabled={autoAssigning}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-gradient-to-r from-orange-500 to-amber-600 hover:opacity-90 text-white rounded-xl text-xs font-bold shadow-xs transition-all cursor-pointer disabled:opacity-50"
+                >
+                  {autoAssigning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                  <span>{autoAssigning ? "Assigning..." : "⚡ Apply AI Matches (Assign All)"}</span>
+                </button>
+              </div>
             </div>
-            <div className="space-y-2">
+
+            {/* Scene Occupancy Tracker Ribbon */}
+            <div className="bg-white/80 border border-orange-200/60 rounded-xl p-3 space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                <span className="font-bold text-[#1D1D1F] flex items-center gap-1.5">
+                  <ListOrdered className="w-3.5 h-3.5 text-indigo-600" />
+                  Scene Slot Status ({scenes.filter((s) => !!s.uploaded_file).length}/{scenes.length} Assigned • {scenes.filter((s) => !s.uploaded_file).length} Vacant)
+                </span>
+                <span className="text-[11px] text-[#6E6E73]">
+                  ⚡ Vacant slots are prioritized for new clips
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {scenes.map((s) => {
+                  const isAssigned = !!s.uploaded_file;
+                  const cleanFileName = s.uploaded_file ? s.uploaded_file.split("/").pop() : null;
+                  return (
+                    <span
+                      key={s.scene_number}
+                      title={isAssigned ? `Scene ${s.scene_number}: Assigned (${cleanFileName})` : `Scene ${s.scene_number}: Vacant / No Video Clip`}
+                      className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all ${
+                        isAssigned
+                          ? "bg-emerald-50 text-emerald-800 border border-emerald-300"
+                          : "bg-amber-50 text-amber-800 border border-dashed border-amber-300"
+                      }`}
+                    >
+                      <span>Scene {String(s.scene_number).padStart(2, "0")}</span>
+                      {isAssigned ? (
+                        <span className="text-emerald-600 font-extrabold text-[10px]">✓ Assigned</span>
+                      ) : (
+                        <span className="text-amber-600 font-extrabold text-[10px]">⚡ Vacant</span>
+                      )}
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="space-y-2.5">
               {unresolved.map((u, i) => {
-                const selectedTarget = fileSceneMap[u.tmp_path] ?? (i + 1);
+                const selectedTarget = fileSceneMap[u.tmp_path] ?? u.suggested_scene_number ?? (i + 1);
+                const matchedScene = scenes.find((s) => s.scene_number === selectedTarget);
+                const confidence = u.confidence ?? 50;
+                const isTargetAssigned = !!matchedScene?.uploaded_file;
+                const vacantScenes = scenes.filter((s) => !s.uploaded_file);
+                const assignedScenes = scenes.filter((s) => !!s.uploaded_file);
+
                 return (
-                  <div key={u.tmp_path || i} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-white border border-amber-200 rounded-xl p-2.5 text-xs">
-                    <span className="font-mono text-[#1D1D1F] truncate max-w-xs">{u.filename}</span>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <span className="text-[#86868B]">Assign to:</span>
-                      <select
-                        value={selectedTarget}
-                        onChange={(e) => {
-                          const val = Number(e.target.value);
-                          setFileSceneMap((prev) => ({ ...prev, [u.tmp_path]: val }));
-                        }}
-                        className="border border-[#E5E5EA] rounded-lg px-2.5 py-1 font-bold text-xs bg-white focus:border-orange-500 focus:outline-none"
-                      >
-                        {scenes.map((s) => (
-                          <option key={s.scene_number} value={s.scene_number}>
-                            Scene {String(s.scene_number).padStart(2, "0")} {s.uploaded_file ? "(Has Video)" : ""}
-                          </option>
-                        ))}
-                      </select>
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          try {
-                            await api.assignUnresolvedVideo(projectId, selectedTarget, u.tmp_path);
-                            setUnresolved((prev) => prev.filter((x) => x.tmp_path !== u.tmp_path));
-                            const updated = await api.getScenes(projectId);
-                            if (onScenesUpdated) onScenesUpdated(updated);
-                            const st = await api.getCopyStatus(projectId);
-                            setCopyStatus(st);
-                          } catch (err: any) {
-                            alert("Assignment failed: " + err.message);
-                          }
-                        }}
-                        className="px-3.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-bold text-xs transition-colors cursor-pointer"
-                      >
-                        Assign
-                      </button>
+                  <div
+                    key={u.tmp_path || i}
+                    className="flex flex-col gap-2 bg-white/90 backdrop-blur-xs border border-orange-200/70 rounded-xl p-3 text-xs shadow-2xs hover:border-orange-300 transition-all"
+                  >
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Film className="w-4 h-4 text-indigo-600 shrink-0" />
+                        <span className="font-mono text-[#1D1D1F] font-semibold truncate max-w-sm" title={u.filename}>
+                          {u.filename}
+                        </span>
+                        {u.duration && (
+                          <span className="text-[10px] bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded font-mono shrink-0">
+                            {u.duration.toFixed(1)}s
+                          </span>
+                        )}
+                        {u.confidence && (
+                          <span
+                            className={`text-[10px] px-2 py-0.5 rounded-full font-bold flex items-center gap-1 shrink-0 ${
+                              confidence >= 80
+                                ? "bg-emerald-100 text-emerald-800 border border-emerald-200"
+                                : confidence >= 50
+                                ? "bg-amber-100 text-amber-800 border border-amber-200"
+                                : "bg-gray-100 text-gray-700 border border-gray-200"
+                            }`}
+                          >
+                            <Sparkles className="w-2.5 h-2.5" />
+                            {confidence >= 80 ? "High Match" : "Match"} ({Math.round(confidence)}%)
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <div className="flex flex-col items-end gap-0.5">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[#86868B] text-[11px] font-medium">Assign to:</span>
+                            <select
+                              value={selectedTarget}
+                              onChange={(e) => {
+                                const val = Number(e.target.value);
+                                setFileSceneMap((prev) => ({ ...prev, [u.tmp_path]: val }));
+                              }}
+                              className={`border rounded-lg px-2.5 py-1 font-bold text-xs bg-white focus:outline-none shadow-2xs ${
+                                isTargetAssigned ? "border-amber-400 text-amber-900 bg-amber-50/40" : "border-[#E5E5EA] text-[#1D1D1F]"
+                              }`}
+                            >
+                              {vacantScenes.length > 0 && (
+                                <optgroup label="⚡ Vacant / Empty Scenes (Recommended)">
+                                  {vacantScenes.map((s) => (
+                                    <option key={s.scene_number} value={s.scene_number}>
+                                      ⚡ Scene {String(s.scene_number).padStart(2, "0")} • Empty (Needs video)
+                                    </option>
+                                  ))}
+                                </optgroup>
+                              )}
+                              {assignedScenes.length > 0 && (
+                                <optgroup label="✓ Already Assigned Scenes (Will Overwrite)">
+                                  {assignedScenes.map((s) => {
+                                    const baseName = s.uploaded_file ? s.uploaded_file.split("/").pop() : "";
+                                    return (
+                                      <option key={s.scene_number} value={s.scene_number}>
+                                        ✓ Scene {String(s.scene_number).padStart(2, "0")} • Assigned: {baseName ? baseName.slice(0, 20) : "video"}
+                                      </option>
+                                    );
+                                  })}
+                                </optgroup>
+                              )}
+                            </select>
+                          </div>
+                          {isTargetAssigned ? (
+                            <span className="text-[10px] font-semibold text-amber-700">
+                              ⚠️ Replaces video in Scene {selectedTarget}
+                            </span>
+                          ) : (
+                            <span className="text-[10px] font-semibold text-emerald-700">
+                              ⚡ Slot is vacant
+                            </span>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              await api.assignUnresolvedVideo(projectId, selectedTarget, u.tmp_path);
+                              setUnresolved((prev) => prev.filter((x) => x.tmp_path !== u.tmp_path));
+                              const updated = await api.getScenes(projectId);
+                              if (onScenesUpdated) onScenesUpdated(updated);
+                              const st = await api.getCopyStatus(projectId);
+                              setCopyStatus(st);
+                            } catch (err: any) {
+                              alert("Assignment failed: " + err.message);
+                            }
+                          }}
+                          className="px-3.5 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-lg font-bold text-xs transition-colors cursor-pointer shadow-2xs"
+                        >
+                          Assign
+                        </button>
+                      </div>
                     </div>
+
+                    {/* AI Explanation and Prompt Preview */}
+                    {(u.match_reason || (matchedScene && (matchedScene.video_prompt || matchedScene.lyrics))) && (
+                      <div className="bg-slate-50 border border-slate-100 rounded-lg p-2 text-[11px] space-y-1">
+                        {u.match_reason && (
+                          <p className="text-indigo-900 font-medium flex items-center gap-1.5">
+                            <span className="font-bold text-indigo-700">AI Reason:</span> {u.match_reason}
+                          </p>
+                        )}
+                        {matchedScene && (matchedScene.video_prompt || matchedScene.lyrics) && (
+                          <p className="text-[#6E6E73] truncate">
+                            <span className="font-semibold text-[#1D1D1F]">Scene {matchedScene.scene_number} Target Prompt:</span>{" "}
+                            {matchedScene.lyrics ? `"${matchedScene.lyrics}" • ` : ""}{matchedScene.video_prompt || ""}
+                          </p>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -697,60 +1022,89 @@ ${prompt}`;
         )}
 
         {/* Sequence and Assembly Controls */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-[#FAFAFC] border border-[#E5E5EA] rounded-2xl">
-          <div className="flex items-center gap-2 text-xs">
-            <ListOrdered className="w-4 h-4 text-cyan-600" />
-            <span className="font-bold text-[#1D1D1F]">Sequence Order:</span>
-            <span className="font-mono text-[#6E6E73]">
-              {scenes.map(s => String(s.scene_number).padStart(2, "0")).join(" → ")}
-            </span>
-          </div>
+        {(() => {
+          const missingScenes = scenes.filter(s => !s.uploaded_file);
+          const allReady = missingScenes.length === 0 && scenes.length > 0;
+          return (
+            <div className="space-y-3">
+              {/* Missing validation banner */}
+              {!allReady && scenes.length > 0 && (
+                <div className="flex flex-col gap-1.5 p-4 bg-red-50 border-2 border-red-300 rounded-2xl">
+                  <div className="flex items-center gap-2 text-sm font-bold text-red-900">
+                    <AlertTriangle className="w-4 h-4 text-red-600 flex-shrink-0" />
+                    <span>⛔ Cannot Assemble — {missingScenes.length} of {scenes.length} scene{missingScenes.length !== 1 ? "s" : ""} missing video clips</span>
+                  </div>
+                  <p className="text-xs text-red-700">
+                    Upload or assign video files to all scene slots before assembling.
+                    Missing: Scenes {missingScenes.map(s => String(s.scene_number).padStart(2, "0")).join(", ")}
+                  </p>
+                </div>
+              )}
 
-          <div className="flex items-center gap-2">
-            <button
-              onClick={async () => {
-                setConfirmingSequence(true);
-                try {
-                  const order = scenes.map(s => s.scene_number).sort((a, b) => a - b);
-                  await api.confirmSceneSequence(projectId, order);
-                  setSequenceConfirmed(true);
-                } catch (err: any) {
-                  alert("Failed to confirm: " + err.message);
-                } finally {
-                  setConfirmingSequence(false);
-                }
-              }}
-              disabled={confirmingSequence || scenes.length === 0}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
-                sequenceConfirmed ? "bg-emerald-600 text-white" : "bg-cyan-600 hover:bg-cyan-700 text-white"
-              }`}
-            >
-              {sequenceConfirmed ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Check className="w-3.5 h-3.5" />}
-              <span>{sequenceConfirmed ? "Sequence Confirmed ✓" : "Confirm Sequence"}</span>
-            </button>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-[#FAFAFC] border border-[#E5E5EA] rounded-2xl">
+                <div className="flex items-center gap-2 text-xs">
+                  <ListOrdered className="w-4 h-4 text-cyan-600" />
+                  <span className="font-bold text-[#1D1D1F]">Sequence Order:</span>
+                  <span className="font-mono text-[#6E6E73]">
+                    {scenes.map(s => String(s.scene_number).padStart(2, "0")).join(" → ")}
+                  </span>
+                </div>
 
-            <button
-              onClick={async () => {
-                setAssembling(true);
-                setAssembleError(null);
-                try {
-                  const res = await api.generateFinalVideoFromUploads(projectId);
-                  setFinalVideoResult(res);
-                  if (onSceneRerendered) onSceneRerendered();
-                } catch (err: any) {
-                  setAssembleError(err?.message || "Assembly failed");
-                } finally {
-                  setAssembling(false);
-                }
-              }}
-              disabled={assembling || scenes.length === 0}
-              className="px-5 py-2 bg-gradient-to-r from-emerald-600 to-green-600 hover:opacity-95 text-white rounded-xl text-xs font-extrabold transition-all shadow-md shadow-emerald-500/20 flex items-center gap-2"
-            >
-              {assembling ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Film className="w-3.5 h-3.5" />}
-              <span>{assembling ? "Assembling FFmpeg Video…" : "Assemble Final Video"}</span>
-            </button>
-          </div>
-        </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={async () => {
+                      setConfirmingSequence(true);
+                      try {
+                        const order = scenes.map(s => s.scene_number).sort((a, b) => a - b);
+                        await api.confirmSceneSequence(projectId, order);
+                        setSequenceConfirmed(true);
+                      } catch (err: any) {
+                        alert("Failed to confirm: " + err.message);
+                      } finally {
+                        setConfirmingSequence(false);
+                      }
+                    }}
+                    disabled={confirmingSequence || scenes.length === 0}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                      sequenceConfirmed ? "bg-emerald-600 text-white" : "bg-cyan-600 hover:bg-cyan-700 text-white"
+                    }`}
+                  >
+                    {sequenceConfirmed ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Check className="w-3.5 h-3.5" />}
+                    <span>{sequenceConfirmed ? "Sequence Confirmed ✓" : "Confirm Sequence"}</span>
+                  </button>
+
+                  <div className="relative group">
+                    <button
+                      onClick={async () => {
+                        setAssembling(true);
+                        setAssembleError(null);
+                        try {
+                          const res = await api.generateFinalVideoFromUploads(projectId);
+                          setFinalVideoResult(res);
+                          if (onSceneRerendered) onSceneRerendered();
+                        } catch (err: any) {
+                          setAssembleError(err?.message || "Assembly failed");
+                        } finally {
+                          setAssembling(false);
+                        }
+                      }}
+                      disabled={assembling || !allReady}
+                      title={!allReady ? `Cannot assemble: ${missingScenes.length} scene(s) still missing video clips` : "Assemble final video"}
+                      className={`px-5 py-2 rounded-xl text-xs font-extrabold transition-all flex items-center gap-2 ${
+                        allReady
+                          ? "bg-gradient-to-r from-emerald-600 to-green-600 hover:opacity-95 text-white shadow-md shadow-emerald-500/20 cursor-pointer"
+                          : "bg-slate-200 text-slate-400 cursor-not-allowed opacity-60"
+                      }`}
+                    >
+                      {assembling ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Film className="w-3.5 h-3.5" />}
+                      <span>{assembling ? "Assembling FFmpeg Video…" : "Assemble Final Video"}</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Assemble error */}
         {assembleError && (
@@ -759,30 +1113,62 @@ ${prompt}`;
           </div>
         )}
 
-        {/* Final Video player result */}
+        {/* Final Video player result & High-CTR Thumbnail */}
         {finalVideoResult && (
-          <div className="bg-emerald-50/50 border border-emerald-300 rounded-3xl p-5 space-y-3">
-            <div className="flex items-center justify-between">
+          <div className="bg-emerald-50/50 border border-emerald-300 rounded-3xl p-5 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-emerald-200 pb-3">
               <span className="text-xs font-bold text-emerald-900 flex items-center gap-1.5">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600" />
                 Final Video Assembled Successfully ({finalVideoResult.duration?.toFixed(1)}s)
               </span>
-              <a
-                href={`${API_BASE}/api/v1/projects/${projectId}/assembly/final-video`}
-                download="final_kids_song.mp4"
-                className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>Download MP4</span>
-              </a>
+              <div className="flex items-center gap-2">
+                <a
+                  href={`${API_BASE}/api/v1/projects/${projectId}/thumbnail?t=${Date.now()}`}
+                  download="thumbnail.jpg"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="px-3 py-1.5 bg-orange-50 hover:bg-orange-100 border border-orange-200 text-[#FF6B00] rounded-xl text-xs font-bold flex items-center gap-1"
+                >
+                  <ImageIcon className="w-3.5 h-3.5" />
+                  <span>Download Thumbnail</span>
+                </a>
+                <a
+                  href={`${API_BASE}/api/v1/projects/${projectId}/assembly/final-video`}
+                  download="final_kids_song.mp4"
+                  className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Download MP4</span>
+                </a>
+              </div>
             </div>
-            <div className="aspect-video bg-black rounded-2xl overflow-hidden max-w-2xl mx-auto shadow-lg">
-              <video
-                src={`${API_BASE}/api/v1/projects/${projectId}/assembly/final-video?t=${Date.now()}`}
-                controls
-                playsInline
-                className="w-full h-full"
-              />
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
+              <div className="aspect-video bg-black rounded-2xl overflow-hidden shadow-md">
+                <video
+                  src={`${API_BASE}/api/v1/projects/${projectId}/assembly/final-video?t=${Date.now()}`}
+                  controls
+                  playsInline
+                  className="w-full h-full"
+                />
+              </div>
+              <div className="relative aspect-video rounded-2xl overflow-hidden bg-slate-900 border border-[#E5E5EA] shadow-md group">
+                <img
+                  src={`${API_BASE}/api/v1/projects/${projectId}/thumbnail?t=${Date.now()}`}
+                  alt="High-CTR YouTube Cover"
+                  className="w-full h-full object-cover"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).src =
+                      "https://placehold.co/1280x720/1e293b/f8fafc?text=High-CTR+Thumbnail+Ready";
+                  }}
+                />
+                <div className="absolute top-2 left-2 px-2 py-0.5 rounded-full bg-red-600/90 text-white text-[10px] font-black uppercase tracking-wider backdrop-blur-xs">
+                  🔥 HIGH CTR / HIGH CPM
+                </div>
+                <div className="absolute bottom-2 right-2 px-2 py-0.5 rounded-md bg-black/80 text-white text-[10px] font-bold backdrop-blur-xs">
+                  16:9 • 1280x720
+                </div>
+              </div>
             </div>
           </div>
         )}

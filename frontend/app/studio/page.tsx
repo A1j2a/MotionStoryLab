@@ -55,6 +55,10 @@ interface UnresolvedFile {
   filename: string;
   tmp_path: string;
   duration?: number;
+  suggested_scene_number?: number;
+  confidence?: number;
+  match_reason?: string;
+  match_source?: string;
 }
 
 interface AssemblyReadiness {
@@ -152,6 +156,8 @@ export default function StudioPage() {
   const [unresolved, setUnresolved] = useState<UnresolvedFile[]>([]);
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [aiMatching, setAiMatching] = useState(false);
+  const [autoAssigning, setAutoAssigning] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [assigningFile, setAssigningFile] = useState<UnresolvedFile | null>(null);
   const [assignTarget, setAssignTarget] = useState<number>(1);
@@ -174,13 +180,46 @@ export default function StudioPage() {
     if (!selectedProjectId) return;
     setLoading(true);
     try {
-      const [scenesData, statusData] = await Promise.all([
+      const [scenesData, statusData, readyData] = await Promise.all([
         api.getScenes(selectedProjectId),
         api.getCopyStatus(selectedProjectId),
+        api.checkAssemblyReadiness(selectedProjectId).catch(() => null),
       ]);
       setScenes(scenesData as SceneWithStatus[]);
       setCopyStatus(statusData);
       setSequenceOrder(scenesData.map((s: Scene) => s.scene_number).sort((a: number, b: number) => a - b));
+
+      if (readyData) {
+        setReadiness(readyData);
+        if (readyData.final_video_exists) {
+          setFinalVideoResult({
+            status: "completed",
+            final_video: readyData.final_video_url || `/api/v1/projects/${selectedProjectId}/assembly/final-video`,
+            duration: readyData.final_video_duration || 0,
+          });
+        } else {
+          setFinalVideoResult(null);
+        }
+
+        if (readyData.unresolved_count && readyData.unresolved_count > 0) {
+          api.aiMatchVideos(selectedProjectId).then((matchRes) => {
+            if (matchRes.matches && matchRes.matches.length > 0) {
+              setUnresolved(
+                matchRes.matches.map((m) => ({
+                  filename: m.filename,
+                  tmp_path: m.tmp_path,
+                  suggested_scene_number: m.suggested_scene_number,
+                  confidence: m.confidence,
+                  match_reason: m.match_reason,
+                  match_source: m.match_source,
+                }))
+              );
+            }
+          }).catch(() => {});
+        } else {
+          setUnresolved([]);
+        }
+      }
     } catch { } finally { setLoading(false); }
   }, [selectedProjectId]);
 
@@ -205,6 +244,56 @@ export default function StudioPage() {
       await loadScenes();
     } catch (err: any) { alert("Upload failed: " + (err?.message || err)); }
     finally { setUploading(false); }
+  };
+
+  const handleRunAiMatch = async () => {
+    if (!selectedProjectId) return;
+    setAiMatching(true);
+    try {
+      const res = await api.aiMatchVideos(selectedProjectId);
+      if (res.matches && res.matches.length > 0) {
+        setUnresolved((prev) =>
+          prev.map((item) => {
+            const match = res.matches.find(
+              (m) => m.filename === item.filename || m.tmp_path === item.tmp_path
+            );
+            if (match) {
+              return {
+                ...item,
+                suggested_scene_number: match.suggested_scene_number,
+                confidence: match.confidence,
+                match_reason: match.match_reason,
+                match_source: match.match_source,
+              };
+            }
+            return item;
+          })
+        );
+      }
+    } catch (err: any) {
+      alert("AI Matching failed: " + (err?.message || err));
+    } finally {
+      setAiMatching(false);
+    }
+  };
+
+  const handleAutoAssignSmart = async () => {
+    if (!unresolved.length || !selectedProjectId) return;
+    setAutoAssigning(true);
+    try {
+      const assignments = unresolved.map((u) => ({
+        tmp_path: u.tmp_path,
+        scene_number: u.suggested_scene_number ?? 1,
+        reason: u.match_reason,
+      }));
+      await api.autoAssignSmart(selectedProjectId, assignments);
+      setUnresolved([]);
+      await loadScenes();
+    } catch (err: any) {
+      alert("Smart assign failed: " + (err?.message || err));
+    } finally {
+      setAutoAssigning(false);
+    }
   };
 
   const handleAssign = async () => {
@@ -398,14 +487,75 @@ export default function StudioPage() {
                 )}
 
                 {unresolved.length > 0 && (
-                  <div className="bg-yellow-50 border border-yellow-200 rounded-2xl p-4 space-y-3">
-                    <h3 className="font-bold text-yellow-800 text-sm flex items-center gap-2"><AlertTriangle className="w-4 h-4" />{unresolved.length} file(s) need manual scene assignment</h3>
-                    {unresolved.map((u) => (
-                      <div key={u.tmp_path} className="flex items-center justify-between bg-white rounded-xl px-4 py-3 border border-yellow-200">
-                        <div><p className="text-sm font-semibold text-[#1D1D1F]">{u.filename}</p>{u.duration && <p className="text-xs text-[#86868B]">{u.duration.toFixed(1)}s</p>}</div>
-                        <button onClick={() => { setAssigningFile(u); setAssignTarget(1); }} className="px-3 py-1.5 bg-[#FF6B00] text-white rounded-xl text-xs font-semibold hover:bg-[#EA580C] transition-colors">Assign to Scene</button>
+                  <div className="bg-gradient-to-br from-indigo-50/70 via-orange-50/50 to-amber-50/80 border border-orange-200/80 rounded-2xl p-4 space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-orange-200/50">
+                      <div>
+                        <h3 className="font-bold text-[#1D1D1F] text-sm flex items-center gap-2">
+                          <Sparkles className="w-4 h-4 text-[#FF6B00]" />
+                          AI Scene Matcher ({unresolved.length} clips)
+                        </h3>
+                        <p className="text-xs text-[#6E6E73]">
+                          AI matched video titles with scene prompts and lyrics.
+                        </p>
                       </div>
-                    ))}
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={handleRunAiMatch}
+                          disabled={aiMatching}
+                          className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                        >
+                          {aiMatching ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                          <span>{aiMatching ? "Matching…" : "Re-Match AI"}</span>
+                        </button>
+                        <button
+                          onClick={handleAutoAssignSmart}
+                          disabled={autoAssigning}
+                          className="px-3.5 py-1.5 bg-gradient-to-r from-orange-500 to-amber-600 hover:opacity-90 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-xs disabled:opacity-50"
+                        >
+                          {autoAssigning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                          <span>{autoAssigning ? "Assigning…" : "⚡ Apply AI Matches"}</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      {unresolved.map((u) => {
+                        const targetSceneNum = u.suggested_scene_number ?? 1;
+                        const matchedScene = scenes.find((s) => s.scene_number === targetSceneNum);
+                        const confidence = u.confidence ?? 50;
+
+                        return (
+                          <div key={u.tmp_path} className="bg-white/90 rounded-xl p-3 border border-orange-200/70 space-y-1.5 shadow-2xs">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <FileVideo className="w-4 h-4 text-indigo-600 shrink-0" />
+                                <span className="text-sm font-semibold text-[#1D1D1F] truncate" title={u.filename}>
+                                  {u.filename}
+                                </span>
+                                {u.duration && <span className="text-xs text-[#86868B]">({u.duration.toFixed(1)}s)</span>}
+                                {u.confidence && (
+                                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${confidence >= 80 ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>
+                                    {Math.round(confidence)}% Match → Scene {targetSceneNum}
+                                  </span>
+                                )}
+                              </div>
+                              <button
+                                onClick={() => { setAssigningFile(u); setAssignTarget(targetSceneNum); }}
+                                className="px-3 py-1 bg-[#FF6B00] text-white rounded-xl text-xs font-semibold hover:bg-[#EA580C] transition-colors shrink-0"
+                              >
+                                Assign to Scene {targetSceneNum}
+                              </button>
+                            </div>
+
+                            {u.match_reason && (
+                              <p className="text-[11px] text-indigo-900 bg-indigo-50/70 px-2 py-1 rounded-md">
+                                <span className="font-bold">AI Reason:</span> {u.match_reason}
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 )}
 

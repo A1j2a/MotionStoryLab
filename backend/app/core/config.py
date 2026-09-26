@@ -49,6 +49,10 @@ class Settings(BaseSettings):
     MAX_RENDER_JOBS: int = 1
     MAX_AI_JOBS: int = 1
 
+    FAL_KEY: str = ""
+    WAN_MODEL: str = "fal-ai/wan-flf2v"
+    WAN_RESOLUTION: str = "720p"
+
     YOUTUBE_CLIENT_ID: str = ""
     YOUTUBE_CLIENT_SECRET: str = ""
     YOUTUBE_REFRESH_TOKEN: str = ""

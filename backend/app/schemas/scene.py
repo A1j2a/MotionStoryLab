@@ -39,6 +39,13 @@ class SceneUpdate(BaseModel):
     status: Optional[str] = None
     render_path: Optional[str] = None
     error: Optional[str] = None
+    prompt_status: Optional[str] = None
+    prompt_copied_at: Optional[str] = None
+    uploaded_file: Optional[str] = None
+    uploaded_duration: Optional[float] = None
+    scene_order: Optional[int] = None
+    video_url: Optional[str] = None
+    local_video_path: Optional[str] = None
 
 
 class SceneRead(SceneBase):
@@ -47,6 +54,15 @@ class SceneRead(SceneBase):
     status: str
     render_path: Optional[str] = None
     error: Optional[str] = None
+    prompt_status: Optional[str] = None
+    prompt_copied_at: Optional[str] = None
+    uploaded_file: Optional[str] = None
+    uploaded_duration: Optional[float] = None
+    scene_order: Optional[int] = None
+    video_url: Optional[str] = None
+    local_video_path: Optional[str] = None
+    start_frame: Optional[str] = None
+    end_frame: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
