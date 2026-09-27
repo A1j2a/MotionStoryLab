@@ -34,7 +34,7 @@ import {
   Compass,
 } from "lucide-react";
 import { api, API_BASE } from "@/lib/api";
-import { HealthData, Project, Job } from "@/lib/types";
+import { HealthData, Project, Job, AISettings } from "@/lib/types";
 
 export interface EngineNodeData {
   id: string;
@@ -69,6 +69,7 @@ export function InteractiveEngineFlow({
   compact = false,
 }: InteractiveEngineFlowProps) {
   const [health, setHealth] = useState<HealthData | null>(null);
+  const [aiSettings, setAiSettings] = useState<AISettings | null>(null);
   const [activeProject, setActiveProject] = useState<Project | null>(null);
   const [activeJob, setActiveJob] = useState<Job | null>(null);
   const [hoveredNode, setHoveredNode] = useState<EngineNodeData | null>(null);
@@ -80,12 +81,16 @@ export function InteractiveEngineFlow({
 
   const containerRef = useRef<HTMLDivElement | null>(null);
 
-  // Fetch health & project
+  // Fetch health, AI settings & project
   const loadData = async () => {
     setRefreshing(true);
     try {
-      const h = await api.getHealth().catch(() => null);
+      const [h, settings] = await Promise.all([
+        api.getHealth().catch(() => null),
+        api.getAISettings().catch(() => null),
+      ]);
       if (h) setHealth(h);
+      if (settings) setAiSettings(settings);
 
       const targetId =
         activeProjectId ||
@@ -128,6 +133,22 @@ export function InteractiveEngineFlow({
     return () => clearInterval(simTimer);
   }, [isSimulating]);
 
+  // Dynamic active models from settings
+  const activeTextModel =
+    aiSettings?.openrouter_model || "deepseek/deepseek-r1:free";
+  const activeTextBadge = activeTextModel.split("/").pop() || "LLM Topic Agent";
+  const activeVideoModel =
+    aiSettings?.wan_model || aiSettings?.video_provider || "fal-ai/wan-flf2v";
+  const activeVideoBadge = activeVideoModel.split("/").pop() || "Wan 2.1 Video";
+  const activeThumbnailModel =
+    aiSettings?.thumbnail_model || "fal-ai/flux/dev";
+  const activeThumbnailBadge =
+    activeThumbnailModel.split("/").pop() || "Flux Dev";
+  const activeAudioModel =
+    aiSettings?.auto_song_generation_enabled
+      ? "Suno AI v3.5 (Auto Sync)"
+      : "Kokoro Neural TTS / Vocal Stems";
+
   // Compute live active stage
   const computeActiveStage = (): number => {
     if (isSimulating) return simulatedStage;
@@ -164,9 +185,9 @@ export function InteractiveEngineFlow({
       icon: Sparkles,
       iconBg: "bg-[#1E293B]",
       iconColor: "text-amber-400",
-      aiEngine: "OpenRouter Deep Research / Llama 3.3",
-      aiBadge: "LLM Topic Agent",
-      modelSlug: "deepseek/deepseek-r1:free",
+      aiEngine: `OpenRouter (${activeTextModel})`,
+      aiBadge: activeTextBadge,
+      modelSlug: activeTextModel,
       endpoint: "https://openrouter.ai/api/v1",
       role: "Researches viral toddler sing-along hooks, repetitive cadence, and phonics.",
       aiActionDetails: [
@@ -179,7 +200,7 @@ export function InteractiveEngineFlow({
       status: "completed",
       metrics: [
         { label: "Target Age", value: "1-5 Yrs" },
-        { label: "Cadence", value: "AABB Meter" },
+        { label: "Model", value: activeTextBadge },
       ],
       actionLink: { label: "Explore Topics", href: "/create" },
     },
@@ -249,21 +270,21 @@ export function InteractiveEngineFlow({
       icon: FileText,
       iconBg: "bg-[#1E293B]",
       iconColor: "text-amber-400",
-      aiEngine: "OpenRouter LLM + Local Ollama (Port 11434)",
-      aiBadge: "Llama 3.2 / DeepSeek-R1",
-      modelSlug: "llama3.2 / deepseek-r1",
+      aiEngine: `OpenRouter (${activeTextModel}) + Ollama (11434)`,
+      aiBadge: activeTextBadge,
+      modelSlug: activeTextModel,
       endpoint: "http://127.0.0.1:11434/api/generate",
-      role: "Creates full original rhyming lyrics and maps them to 18 animated camera scenes.",
+      role: "Creates full original rhyming lyrics and maps them to animated camera scenes.",
       aiActionDetails: [
         "Synthesizes 100% original preschool lyrics with onomatopoeia (beep beep, splash splash).",
         "Divides complete song into structured 5 to 8 second scene visual prompts.",
         "Specifies camera motion choreography for each scene (Tracking, Low-Angle, Orbit, Close-Up).",
       ],
       inputs: ["Topic & Rhyme Seed", "Duration Directive", "Character Description"],
-      outputs: ["Structured Lyrics JSON", "18x Scene Visual Prompts", "Camera Direction Matrix"],
+      outputs: ["Structured Lyrics JSON", "Scene Visual Prompts", "Camera Direction Matrix"],
       status: currentStage >= 1 ? (currentStage === 1 ? "running" : "completed") : "ready",
       metrics: [
-        { label: "Total Scenes", value: "18 Scenes" },
+        { label: "Active Model", value: activeTextBadge },
         { label: "Rhyme Scheme", value: "AABB Metric" },
       ],
       actionLink: { label: "Scene Editor", href: "/scenes" },
@@ -277,9 +298,9 @@ export function InteractiveEngineFlow({
       icon: Layers,
       iconBg: "bg-[#1E293B]",
       iconColor: "text-blue-400",
-      aiEngine: "Fal.ai Flux / Local 3D Turnaround Generator",
-      aiBadge: "Flux Dev / LoRA Consistency",
-      modelSlug: "fal-ai/flux/dev",
+      aiEngine: `Fal.ai (${activeThumbnailBadge}) / Turnaround Generator`,
+      aiBadge: "Pixar 3D Lock",
+      modelSlug: activeThumbnailModel,
       endpoint: "https://fal.run/fal-ai/flux/dev",
       role: "Maintains 100% facial and appearance identity of characters across every scene.",
       aiActionDetails: [
@@ -306,8 +327,8 @@ export function InteractiveEngineFlow({
       iconBg: "bg-[#1E293B]",
       iconColor: "text-emerald-400",
       aiEngine: "Suno AI v3.5 / Kokoro Neural Voice + FFmpeg DSP",
-      aiBadge: "Neural Audio + Subtitles",
-      modelSlug: "suno-v3.5 / kokoro-fastapi",
+      aiBadge: "Neural Audio + SRT",
+      modelSlug: activeAudioModel,
       endpoint: "http://127.0.0.1:8880 + Suno Audio Hub",
       role: "Produces vocal song soundtrack and aligns word-level millisecond SRT subtitles.",
       aiActionDetails: [
@@ -345,7 +366,7 @@ export function InteractiveEngineFlow({
       "Branch B (Creator Upload Studio): When creator uploads MP4s, auto-validates and sequences clips.",
       "Validates resolution, duration, FPS, and prevents black-frame drops.",
     ],
-    inputs: ["18x Scene Prompts", "Scene Duration Arrays", "Creator Upload Watcher"],
+    inputs: ["Scene Prompts", "Scene Duration Arrays", "Creator Upload Watcher"],
     outputs: ["Route Selection", "Validated Scene Manifest", "Frame Buffer Sequence"],
     status: currentStage >= 4 ? (currentStage === 4 ? "running" : "completed") : "standby",
     metrics: [
@@ -364,10 +385,10 @@ export function InteractiveEngineFlow({
       icon: Film,
       iconBg: "bg-[#1E293B]",
       iconColor: "text-purple-400",
-      aiEngine: "Fal.ai Wan 2.1 Video Provider",
-      aiBadge: "fal-ai/wan-flf2v",
-      modelSlug: "fal-ai/wan-flf2v",
-      endpoint: "https://fal.run/fal-ai/wan-flf2v",
+      aiEngine: `Fal.ai (${activeVideoBadge}) Provider`,
+      aiBadge: activeVideoBadge,
+      modelSlug: activeVideoModel,
+      endpoint: `https://fal.run/${activeVideoModel}`,
       role: "Generates 720p 24fps 3D animated scene videos with camera choreography.",
       aiActionDetails: [
         "Translates scene JSON into Wan First-Frame to Last-Frame generation payloads.",
@@ -375,11 +396,11 @@ export function InteractiveEngineFlow({
         "Applies negative prompts to strictly exclude real humans, dark tones, and distortion.",
       ],
       inputs: ["Scene Prompts", "Character Turnaround", "Negative Prompt Filter"],
-      outputs: ["scene_001.mp4 to scene_018.mp4", "Start/End Keyframes", "Motion Vectors"],
+      outputs: ["Rendered Scene MP4s", "Start/End Keyframes", "Motion Vectors"],
       status: currentStage >= 4 ? (currentStage === 4 ? "running" : "completed") : "standby",
       metrics: [
+        { label: "Model", value: activeVideoBadge },
         { label: "Resolution", value: "720p 24fps" },
-        { label: "Frames", value: "81 Frames/Shot" },
       ],
       actionLink: { label: "Render Pipeline", href: "/render" },
     },
@@ -433,7 +454,7 @@ export function InteractiveEngineFlow({
       "Seamless Transitions: Merges intro/outro branding without muting scene soundtrack.",
     ],
     inputs: [
-      "18x Rendered Scene Videos",
+      "Rendered Scene Videos",
       "master_soundtrack.wav",
       "subtitles.srt",
       "Channel Watermark Logo",
@@ -456,11 +477,11 @@ export function InteractiveEngineFlow({
     icon: Sparkles,
     iconBg: "bg-[#1E293B]",
     iconColor: "text-amber-500",
-    aiEngine: "Topic-Aligned 3D Pixar AI Prompt Engine",
-    aiBadge: "3D Pixar / Flux Prompt",
-    modelSlug: "fal-ai/flux/dev + Midjourney v6 Prompt",
+    aiEngine: `Topic-Aligned 3D Pixar + ${activeThumbnailBadge}`,
+    aiBadge: activeThumbnailBadge,
+    modelSlug: `${activeThumbnailModel} + 3D Pixar Engine`,
     endpoint: "Internal High-CTR Compositor",
-    role: "Generates topic-based 3D Pixar cover prompt (never video frame) with compact candy title.",
+    role: "Generates topic-based 3D Pixar cover prompt with compact candy typography.",
     aiActionDetails: [
       "Builds rich 3D Pixar thumbnail prompt based on project topic & characters.",
       "NEVER extracts frames from video clips (100% pure thematic illustration).",
@@ -472,7 +493,7 @@ export function InteractiveEngineFlow({
     outputs: ["thumbnail.jpg (1280x720)", "thumbnail_prompt.txt", "YouTube SEO Package"],
     status: currentStage >= 6 ? "completed" : "ready",
     metrics: [
-      { label: "Cover CTR", value: "High-CTR 3D" },
+      { label: "Model", value: activeThumbnailBadge },
       { label: "Title Size", value: "Compact 48px" },
     ],
     actionLink: { label: "SEO & Thumbnail", href: "/studio" },
@@ -574,19 +595,19 @@ export function InteractiveEngineFlow({
       `}</style>
 
       {/* Engine Telemetry & Header Controls */}
-      <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 mb-8 border-b border-[#E5E5EA]">
+      <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 mb-6 border-b border-[#E5E5EA]">
         <div className="flex items-center gap-3.5">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-[#FF6B00] via-[#FF8533] to-[#FFA366] flex items-center justify-center text-white shadow-md shadow-orange-500/20">
+          <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-[#FF6B00] via-[#FF8533] to-[#FFA366] flex items-center justify-center text-white shadow-md shadow-orange-500/20 shrink-0">
             <Activity className="w-6 h-6 animate-pulse" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-base sm:text-lg font-extrabold text-[#1D1D1F] tracking-tight">
                 Live AI Engine Architecture & Pipeline Flow
               </h2>
               <span className="text-[10px] font-extrabold px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1.5 shadow-xs">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" />
-                ENGINE RUNNING
+                ENGINE LIVE
               </span>
             </div>
             <p className="text-xs text-[#6E6E73] mt-0.5">
@@ -594,12 +615,12 @@ export function InteractiveEngineFlow({
               <strong className="text-[#1D1D1F]">
                 &ldquo;{activeProject?.title || "Bella the Blue Bus & The Fun Ride"}&rdquo;
               </strong>{" "}
-              • Stage 0{currentStage}/06 Active • Hover any node for AI details
+              • Stage 0{currentStage}/06 Active • Select any node for telemetry
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2.5 self-start md:self-auto">
           <button
             onClick={() => setIsSimulating(!isSimulating)}
             className={`inline-flex items-center gap-1.5 text-xs font-bold px-3.5 py-2 rounded-xl border transition-all cursor-pointer shadow-xs ${
@@ -632,12 +653,100 @@ export function InteractiveEngineFlow({
         </div>
       </div>
 
+      {/* Active AI Models Status Banner (Live Settings Synced) */}
+      <div className="relative z-10 mb-8 p-4 rounded-2xl bg-gradient-to-r from-orange-50/70 via-white to-sky-50/70 border border-orange-200/80 shadow-xs">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2.5 border-b border-orange-100">
+          <div className="flex items-center gap-2">
+            <span className="flex h-2.5 w-2.5 relative">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
+            </span>
+            <span className="text-xs font-extrabold uppercase tracking-wider text-[#1D1D1F]">
+              Active AI Models In Use
+            </span>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+              Settings Synced
+            </span>
+          </div>
+          <Link
+            href="/settings"
+            className="inline-flex items-center gap-1 text-[11px] font-bold text-[#FF6B00] hover:text-[#EA580C] hover:underline self-start sm:self-auto"
+          >
+            <Sliders className="w-3.5 h-3.5" />
+            <span>Manage AI Models in Settings</span>
+            <ExternalLink className="w-3 h-3" />
+          </Link>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 pt-2.5 text-xs">
+          {/* Model 1: Script & Story LLM */}
+          <div className="flex items-center gap-2.5 p-2.5 rounded-xl bg-white/90 border border-[#E5E5EA] shadow-xs hover:border-amber-300 transition-colors">
+            <div className="w-7 h-7 rounded-lg bg-amber-500/10 text-amber-600 flex items-center justify-center shrink-0">
+              <FileText className="w-3.5 h-3.5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <span className="text-[9px] uppercase font-bold text-[#6E6E73] block leading-tight">
+                Text & Story LLM
+              </span>
+              <span className="text-xs font-mono font-bold text-[#1D1D1F] truncate block" title={activeTextModel}>
+                {activeTextModel}
+              </span>
+            </div>
+          </div>
+
+          {/* Model 2: AI Video Generator */}
+          <div className="flex items-center gap-2.5 p-2.5 rounded-xl bg-white/90 border border-[#E5E5EA] shadow-xs hover:border-purple-300 transition-colors">
+            <div className="w-7 h-7 rounded-lg bg-purple-500/10 text-purple-600 flex items-center justify-center shrink-0">
+              <Film className="w-3.5 h-3.5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <span className="text-[9px] uppercase font-bold text-[#6E6E73] block leading-tight">
+                Video Engine
+              </span>
+              <span className="text-xs font-mono font-bold text-[#1D1D1F] truncate block" title={activeVideoModel}>
+                {activeVideoModel}
+              </span>
+            </div>
+          </div>
+
+          {/* Model 3: 3D Thumbnail & Cover */}
+          <div className="flex items-center gap-2.5 p-2.5 rounded-xl bg-white/90 border border-[#E5E5EA] shadow-xs hover:border-sky-300 transition-colors">
+            <div className="w-7 h-7 rounded-lg bg-sky-500/10 text-sky-600 flex items-center justify-center shrink-0">
+              <Sparkles className="w-3.5 h-3.5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <span className="text-[9px] uppercase font-bold text-[#6E6E73] block leading-tight">
+                Thumbnail Engine
+              </span>
+              <span className="text-xs font-mono font-bold text-[#1D1D1F] truncate block" title={activeThumbnailModel}>
+                {activeThumbnailModel}
+              </span>
+            </div>
+          </div>
+
+          {/* Model 4: Audio & Voice Synth */}
+          <div className="flex items-center gap-2.5 p-2.5 rounded-xl bg-white/90 border border-[#E5E5EA] shadow-xs hover:border-emerald-300 transition-colors">
+            <div className="w-7 h-7 rounded-lg bg-emerald-500/10 text-emerald-600 flex items-center justify-center shrink-0">
+              <Music className="w-3.5 h-3.5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <span className="text-[9px] uppercase font-bold text-[#6E6E73] block leading-tight">
+                Audio & Song
+              </span>
+              <span className="text-xs font-mono font-bold text-[#1D1D1F] truncate block" title={activeAudioModel}>
+                {activeAudioModel}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* ============================================================== */}
-      {/* THE FLOWCHART / SCHEMATIC CANVAS (Matching Reference Screenshot) */}
+      {/* THE FLOWCHART / SCHEMATIC CANVAS (Responsive Layout) */}
       {/* ============================================================== */}
-      <div className="relative z-10 max-w-2xl mx-auto flex flex-col items-center space-y-4">
+      <div className="relative z-10 w-full max-w-2xl mx-auto flex flex-col items-center space-y-4">
         {/* Tier 1: Input Seeds (Converging from Top) */}
-        <div className="w-full flex flex-col sm:flex-row items-center justify-between gap-3">
+        <div className="w-full grid grid-cols-1 sm:grid-cols-3 gap-3">
           {INPUT_NODES.map((node) => (
             <FlowNodeCard
               key={node.id}
@@ -653,7 +762,12 @@ export function InteractiveEngineFlow({
 
         {/* Converging Dotted Cables into Central Pulse Junction */}
         <div className="w-full flex flex-col items-center relative py-1">
-          <svg className="w-full h-12 overflow-visible" xmlns="http://www.w3.org/2000/svg">
+          <svg
+            viewBox="0 0 660 48"
+            preserveAspectRatio="xMidYMid meet"
+            className="w-full max-w-2xl h-10 sm:h-12 overflow-visible"
+            xmlns="http://www.w3.org/2000/svg"
+          >
             {/* Left to center conduit */}
             <path
               d="M 120 0 V 16 Q 120 28, 200 32 H 300 V 48"
@@ -680,7 +794,7 @@ export function InteractiveEngineFlow({
             />
           </svg>
 
-          {/* Glowing Purple/Pink Junction Ring (From User Reference Image) */}
+          {/* Glowing Purple/Pink Junction Ring */}
           <JunctionPulseRing label="Context Convergence" />
         </div>
 
@@ -729,14 +843,14 @@ export function InteractiveEngineFlow({
           />
         </div>
 
-        {/* Glowing Large Pulsing Ring (Stage Gate from User Image) */}
+        {/* Glowing Large Pulsing Ring */}
         <div className="py-2 flex flex-col items-center">
           <ConnectorPipe length="short" />
           <JunctionPulseRing label="Audio-Visual Sync Gate" color="purple" />
           <ConnectorPipe length="short" />
         </div>
 
-        {/* Tier 3: Condition Routing Node (Matching "Condition" in user screenshot) */}
+        {/* Tier 3: Condition Routing Node */}
         <div className="w-full max-w-md">
           <FlowNodeCard
             node={CONDITION_NODE}
@@ -749,9 +863,14 @@ export function InteractiveEngineFlow({
           />
         </div>
 
-        {/* Splitting Branches (From User Reference Image) */}
+        {/* Splitting Branches */}
         <div className="w-full flex flex-col items-center relative py-1">
-          <svg className="w-full h-12 overflow-visible" xmlns="http://www.w3.org/2000/svg">
+          <svg
+            viewBox="0 0 660 48"
+            preserveAspectRatio="xMidYMid meet"
+            className="w-full max-w-2xl h-10 sm:h-12 overflow-visible"
+            xmlns="http://www.w3.org/2000/svg"
+          >
             {/* Split from center to Left (Wan AI) */}
             <path
               d="M 330 0 V 16 Q 330 28, 220 32 H 180 V 48"
@@ -795,7 +914,12 @@ export function InteractiveEngineFlow({
 
         {/* Re-convergence into Master Compositor */}
         <div className="w-full flex flex-col items-center relative py-1">
-          <svg className="w-full h-12 overflow-visible" xmlns="http://www.w3.org/2000/svg">
+          <svg
+            viewBox="0 0 660 48"
+            preserveAspectRatio="xMidYMid meet"
+            className="w-full max-w-2xl h-10 sm:h-12 overflow-visible"
+            xmlns="http://www.w3.org/2000/svg"
+          >
             <path
               d="M 180 0 V 16 Q 180 28, 280 32 H 330 V 48"
               fill="none"

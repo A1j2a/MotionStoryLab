@@ -41,13 +41,35 @@ async def get_discovered_topics(
     duration: Optional[str] = Query(None, description="Duration filter"),
     language: Optional[str] = Query(None, description="Language / market filter"),
     seed: Optional[int] = Query(None, description="Random seed for fresh dynamic variations"),
+    session: AsyncSession = Depends(get_db_session),
 ):
     """
     Step 1: '🔥 Find Today's Kids Topics'
     Researches current kids topic opportunities exclusively from Live AI with custom filters.
+    Strictly filters out and excludes any topics that already have projects/videos in the database,
+    and guarantees zero duplicate or repeat topics across discoveries.
     """
     import asyncio
+    from sqlalchemy import select
+
     try:
+        stmt = select(Project)
+        res = await session.execute(stmt)
+        projects = res.scalars().all()
+        excluded: List[str] = []
+        for p in projects:
+            if p.topic:
+                excluded.append(p.topic)
+            if p.title:
+                excluded.append(p.title)
+            if p.metadata_json and isinstance(p.metadata_json, dict):
+                tinfo = p.metadata_json.get("topic_info")
+                if isinstance(tinfo, dict):
+                    if tinfo.get("topic"):
+                        excluded.append(tinfo.get("topic"))
+                    if tinfo.get("suggested_title"):
+                        excluded.append(tinfo.get("suggested_title"))
+
         return await asyncio.to_thread(
             discover_kids_topics,
             limit=limit,
@@ -55,6 +77,7 @@ async def get_discovered_topics(
             duration=duration,
             language=language,
             seed=seed,
+            excluded_topics=excluded,
         )
     except Exception as e:
         raise HTTPException(

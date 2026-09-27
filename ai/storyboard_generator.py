@@ -15,24 +15,30 @@ def _compose_video_prompt(
     lyrics: str,
     cam: Dict[str, Any],
     scene_num: int,
+    additional_chars: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
-    """Generates high-fidelity 3D preschool video generation prompts for AI engines (Luma, Kling, Seedance, Runway, Sora)."""
-    clean_app = char_appearance or "cute animated toddler character with bright expressive eyes, rosy cheeks, and warm joyful smile"
-    clean_cloth = char_clothing or "vibrant colorful preschool overalls and sneakers"
-    clean_env = env_name or "vibrant preschool storybook meadow with blooming toy flowers and soft rainbow clouds"
+    """Generates high-fidelity 3D preschool video generation prompts matching Pixar/CoComelon benchmark."""
+    clean_app = char_appearance or "cute animated toddler character with large round expressive eyes, rosy cheeks, and joyful warm smile"
+    clean_cloth = char_clothing or "vibrant preschool dungarees, colorful t-shirt, and sneakers"
+    clean_env = env_name or "vibrant sunlit storybook farm with rustic wooden barn, blooming flowers, and lush green meadows"
     cam_move = cam.get("movement", "smooth cinematic push-in")
     cam_shot = cam.get("shot", "medium tracking shot")
     cam_angle = cam.get("angle", "eye-level")
     lighting = cam.get("lighting", "warm golden morning sunlight with gentle rim light")
 
-    action_view = action or f"joyfully dancing and singing with playful hand gestures"
+    action_view = action or "joyfully dancing, bouncing rhythmically, and gesturing enthusiastically"
+
+    extra_chars_str = ""
+    if additional_chars:
+        extra_names = ", ".join([c.get("name", "friend") for c in additional_chars[:2]])
+        extra_chars_str = f" alongside {extra_names} joining the cheerful choreography,"
 
     return (
-        f"Original 3D Stylized CGI Animation: {char_name}, {clean_app}, wearing {clean_cloth}. "
-        f"Visual View & Action: {char_name} is {action_view}, performing in perfect synchronization to the melody line: '{lyrics}'. "
-        f"Environment & Scene: {clean_env} with vibrant interactive playground props, dancing musical notes, and floating sun sparkles. "
+        f"Original 3D Stylized Pixar and CoComelon CGI Animation: {char_name}, {clean_app}, wearing {clean_cloth}{extra_chars_str}. "
+        f"Visual Action & Narrative: {char_name} is {action_view}, directly acting out and visually narrating the lyrics: '{lyrics}'. "
+        f"Environment & Scene: {clean_env} under bright blue sunny skies with warm volumetric sunbeams and vibrant saturated preschool palette. "
         f"Cinematography: {cam_move} {cam_shot} from {cam_angle}, {lighting}, shallow depth of field bokeh, "
-        f"Unreal Engine 5 render, raytraced subsurface scattering, vibrant saturated preschool colors, fluid toddler motion, 8k ultra-detailed."
+        f"8K Unreal Engine 5 render, raytraced subsurface scattering on skin, glossy expressive cartoon eyes, fluid toddler motion."
     )
 
 
@@ -86,19 +92,25 @@ def generate_storyboard(
         for s in scenes
     ]
 
-    enrich_prompt = f"""You are an elite 3D children animation director.
+    all_chars_desc = ", ".join([
+        f"{c.get('name', 'Character')} ({c.get('appearance', 'cute toddler')}, wearing {c.get('clothing', 'preschool outfit')})"
+        for c in characters[:3]
+    ]) if characters else f"{main_char_name} — {main_char_app}, wearing {main_char_clothing}"
+
+    enrich_prompt = f"""You are an elite 3D children animation director specializing in top-tier Pixar and CoComelon CGI preschool animations.
 Topic: '{topic}'
-Character: {main_char_name} — {main_char_app}, wearing {main_char_clothing}.
-Environment: {main_env_name}
+Cast & Characters: {all_chars_desc}
+Environment / Setting: {main_env_name}
 
 I have {len(scenes)} scenes already planned at {target_scene_duration}s each.
-For EACH scene below, write ONE rich, production-ready 'video_prompt' for AI Video Generators (Google Flow, Luma, Kling, Runway, Sora).
+For EACH scene below, write ONE rich, production-ready 'video_prompt' for AI Video Generators (Google Flow, Luma, Kling, Wan 2.1, Runway, Sora).
 
-Rules for each video_prompt:
-- Original 3D Stylized CGI, vibrant preschool colors, 8K ultra-detailed.
-- Describe what is VISUALLY HAPPENING on screen during those lyrics.
-- Include character action/expression, camera movement, lighting, environment props.
-- 2–4 sentences. Must NOT just repeat the lyrics as-is.
+VISUAL BENCHMARK (Strictly Follow Reference Quality):
+- Style: Stylized 3D Pixar & CoComelon CGI Animation, vibrant saturated preschool candy palette, 8K Unreal Engine 5 render.
+- Character Aesthetics: Smooth porcelain skin with soft subsurface scattering, large round expressive glossy cartoon eyes, rosy cheeks, warm joyful facial expressions.
+- Acting & Lyrics Alignment: The visual choreography MUST strictly act out the specific lyric line for that scene. Characters must physically perform the actions, gestures, and story mentioned in the lyrics (e.g., dancing on a sunlit farm with grandpa, clapping, jumping over flowers, pointing at clouds).
+- Camera & Lighting: Cinematic camera motion (tracking, slow push-in, gentle crane), soft 3-point studio lighting with warm golden sunbeams and shallow depth of field bokeh.
+- Length: 2 to 4 rich descriptive sentences per prompt.
 
 Scenes to enrich:
 {json.dumps(lyric_lines_for_ai, indent=2)}
@@ -109,7 +121,7 @@ IMPORTANT: Return EXACTLY {len(scenes)} prompts, one per scene. Do NOT add or re
     try:
         res = provider.generate_json(
             enrich_prompt,
-            "You are a 3D animation director. Return valid JSON only."
+            "You are an elite 3D Pixar/CoComelon animation director. Return valid JSON only."
         )
         if res and "prompts" in res and isinstance(res["prompts"], list):
             prompt_map = {
@@ -153,6 +165,7 @@ def build_procedural_storyboard(
     char_name = char_obj.get("name", "Hero")
     char_app = char_obj.get("appearance", "cute toddler with cheerful smile and bright curious eyes")
     char_cloth = char_obj.get("clothing", "colorful preschool outfit")
+    extra_chars = characters[1:] if len(characters) > 1 else None
 
     env_obj = environments[0] if environments else {"id": "env_01", "name": "Sunny Storybook World"}
     env_name = env_obj.get("name", "Sunny Storybook World")
@@ -210,6 +223,7 @@ def build_procedural_storyboard(
             lyrics=lyrics_line,
             cam=cam,
             scene_num=idx,
+            additional_chars=extra_chars,
         )
 
         scene = {

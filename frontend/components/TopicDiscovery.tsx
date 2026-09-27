@@ -100,6 +100,9 @@ export function TopicDiscovery({ onSelectTopic }: TopicDiscoveryProps) {
               <Flame className="w-3.5 h-3.5 text-orange-600 fill-orange-500" />
               <span>Step 1 • 100% Dynamic AI Topic Discovery</span>
             </div>
+            <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+              <span>✨ Zero Repeats • Produced Topics Excluded</span>
+            </div>
             {activeModel && (
               <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200">
                 <Cpu className="w-3 h-3 text-purple-600" />
@@ -111,7 +114,7 @@ export function TopicDiscovery({ onSelectTopic }: TopicDiscoveryProps) {
             Find Today&apos;s High-Engagement Kids & Nursery Rhyme Topics
           </h2>
           <p className="text-xs text-[#6E6E73] leading-relaxed">
-            Live AI evaluates search intent, preschool trends, and audio-visual opportunity signals to generate structured candidates with 10M+ view potential in real-time.
+            Live AI evaluates search intent, preschool trends, and audio-visual opportunity signals to generate fresh, unique candidates with 10M+ view potential without repeating past video topics.
           </p>
         </div>
 

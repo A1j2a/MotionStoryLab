@@ -261,7 +261,7 @@ class OllamaProvider(BaseAIProvider):
         return "qwen2.5:1.5b"
 
     def _call_api(self, prompt: str, system_prompt: str = "", temperature: float = 0.7, json_format: bool = False, max_tokens: Optional[int] = None) -> Optional[str]:
-        num_tokens = max_tokens or 600
+        num_tokens = max_tokens or 2000
         # 1. Native /api/chat endpoint
         target_url = f"{self.base_url}/api/chat"
         headers = {"Content-Type": "application/json"}
@@ -284,7 +284,7 @@ class OllamaProvider(BaseAIProvider):
                 headers=headers,
                 method="POST",
             )
-            with urllib.request.urlopen(req, timeout=30) as response:
+            with urllib.request.urlopen(req, timeout=45) as response:
                 if response.status == 200:
                     data = json.loads(response.read().decode("utf-8"))
                     msg = data.get("message", {})
@@ -314,7 +314,7 @@ class OllamaProvider(BaseAIProvider):
                 headers=headers,
                 method="POST",
             )
-            with urllib.request.urlopen(req, timeout=30) as response:
+            with urllib.request.urlopen(req, timeout=45) as response:
                 if response.status == 200:
                     data = json.loads(response.read().decode("utf-8"))
                     return data["choices"][0]["message"]["content"]
@@ -324,13 +324,13 @@ class OllamaProvider(BaseAIProvider):
         return None
 
     def generate_json(self, prompt: str, system_prompt: str = "", max_tokens: Optional[int] = None) -> Optional[Dict[str, Any]]:
-        raw = self._call_api(prompt, system_prompt, json_format=True, max_tokens=max_tokens or 600)
+        raw = self._call_api(prompt, system_prompt, json_format=True, max_tokens=max_tokens or 2000)
         if not raw:
             return None
         return extract_and_repair_json(raw)
 
     def generate_text(self, prompt: str, system_prompt: str = "", max_tokens: Optional[int] = None) -> Optional[str]:
-        return self._call_api(prompt, system_prompt, json_format=False, max_tokens=max_tokens or 600)
+        return self._call_api(prompt, system_prompt, json_format=False, max_tokens=max_tokens or 2000)
 
 
 class ClaudeProvider(BaseAIProvider):
