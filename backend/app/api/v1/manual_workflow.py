@@ -1301,6 +1301,11 @@ async def generate_final_video_from_uploads(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
+    project_dir = Path(str(settings.resolved_project_dir)) / project_id
+    output_dir = project_dir / "output"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    final_video = output_dir / "final_video.mp4"
+
     result = await session.execute(
         select(Scene).where(Scene.project_id == project_id).order_by(
             Scene.scene_order.asc(), Scene.scene_number.asc()
@@ -1355,11 +1360,6 @@ async def generate_final_video_from_uploads(
             status_code=400,
             detail=f"Assembly Validation Error: Missing video files for {len(missing)} scene(s) ({missing_str}). All {len(scenes)} scenes must have uploaded video clips before assembling."
         )
-
-    project_dir = Path(str(settings.resolved_project_dir)) / project_id
-    output_dir = project_dir / "output"
-    output_dir.mkdir(parents=True, exist_ok=True)
-    final_video = output_dir / "final_video.mp4"
 
     # Find audio robustly (master_soundtrack.wav, song.mp3, etc.)
     audio_file = None
@@ -1555,32 +1555,63 @@ def _assemble_final_video(
         subprocess.run(norm_cmd, check=True, capture_output=True, text=True, timeout=300)
         normalized_scenes.append(norm_p)
 
-    # ── STEP 2: Concat scene clips into continuous scene body (Stream copy for instantaneous concat) ──
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+    # ── STEP 2: Concat scene clips into continuous scene body ──
+    concat_txt_path = work_dir / "concat_scenes_list.txt"
+    with open(concat_txt_path, "w", encoding="utf-8") as f:
         for np in normalized_scenes:
             f.write(f"file '{str(np)}'\n")
-        concat_txt = f.name
-    temp_files_to_clean.append(Path(concat_txt))
+    temp_files_to_clean.append(concat_txt_path)
 
     scenes_body_raw = work_dir / "scenes_body_raw.mp4"
     temp_files_to_clean.append(scenes_body_raw)
 
+    concat_success = False
+    # Attempt 1: Fast stream copy concat
     concat_cmd = [
         ffmpeg_bin, "-y",
         "-f", "concat", "-safe", "0",
-        "-i", concat_txt,
+        "-i", str(concat_txt_path),
         "-c", "copy",
         str(scenes_body_raw)
     ]
-    res_cat = subprocess.run(concat_cmd, capture_output=True, text=True, timeout=120)
-    if res_cat.returncode != 0:
-        # Fallback to re-encode if stream copy fails
+    res_cat = subprocess.run(concat_cmd, capture_output=True, text=True, timeout=180)
+    if res_cat.returncode == 0 and scenes_body_raw.exists() and scenes_body_raw.stat().st_size > 1000:
+        concat_success = True
+    else:
+        logger.info("Stream copy concat did not complete cleanly, running standard re-encode concat...")
+        # Attempt 2: Re-encode concat
         re_concat = [
-            ffmpeg_bin, "-y", "-f", "concat", "-safe", "0", "-i", concat_txt,
+            ffmpeg_bin, "-y", "-f", "concat", "-safe", "0", "-i", str(concat_txt_path),
             "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
             "-c:a", "aac", "-b:a", "192k", str(scenes_body_raw)
         ]
-        subprocess.run(re_concat, check=True, capture_output=True, text=True, timeout=300)
+        res_re = subprocess.run(re_concat, capture_output=True, text=True, timeout=360)
+        if res_re.returncode == 0 and scenes_body_raw.exists() and scenes_body_raw.stat().st_size > 1000:
+            concat_success = True
+        else:
+            # Attempt 3: Filter complex concat as ultimate fallback
+            logger.info("Concat demuxer fallback to filter_complex...")
+            fc_inputs = []
+            fc_filter = ""
+            for i, np in enumerate(normalized_scenes):
+                fc_inputs.extend(["-i", str(np)])
+                fc_filter += f"[{i}:v:0][{i}:a:0]"
+            fc_filter += f"concat=n={len(normalized_scenes)}:v=1:a=1[v_cat][a_cat]"
+            fc_cmd = [
+                ffmpeg_bin, "-y",
+                *fc_inputs,
+                "-filter_complex", fc_filter,
+                "-map", "[v_cat]", "-map", "[a_cat]",
+                "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
+                "-c:a", "aac", "-b:a", "192k",
+                str(scenes_body_raw)
+            ]
+            res_fc = subprocess.run(fc_cmd, capture_output=True, text=True, timeout=360)
+            if res_fc.returncode == 0 and scenes_body_raw.exists() and scenes_body_raw.stat().st_size > 1000:
+                concat_success = True
+            else:
+                err_msg = res_fc.stderr or res_re.stderr or res_cat.stderr or "Unknown FFmpeg error"
+                raise RuntimeError(f"FFmpeg scene concatenation failed: {err_msg[:400]}")
 
     # ── STEP 3: Multi-Track Audio Mixing (Scene SFX + Song Track) & Subtitles ──
     scenes_body_mixed = work_dir / "scenes_body_mixed.mp4"

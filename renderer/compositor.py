@@ -402,13 +402,40 @@ def build_high_ctr_thumbnail_prompt(
 ) -> str:
     """
     Builds an ultra-high CTR 3D Disney Pixar style YouTube thumbnail prompt based on the specific topic.
-    Designed for Midjourney v6, Leonardo, Flux Dev, and DALL-E 3.
+    Uses DeepSeek / AI Provider for rich dynamic prompt generation.
     Strictly specifies NO TEXT / NO WATERMARK so that clean typography can be overlaid.
     """
     clean_topic = topic or title or "Preschool Kids Song"
     for sep in ["|", ":", " - ", "—", "(", "["]:
         if sep in clean_topic:
             clean_topic = clean_topic.split(sep)[0].strip()
+
+    # Try generating high-CTR prompt with DeepSeek / AI Provider
+    try:
+        from ai.providers import get_ai_provider
+        provider = get_ai_provider()
+        ai_req = f"""You are an elite YouTube Kids thumbnail designer and prompt engineer specializing in 3D Pixar/CoComelon CGI preschool artwork.
+Song Title: '{title}'
+Topic: '{clean_topic}'
+Hero Character: {character_name} ({appearance or 'cute 3D preschool character with sparkling joyful cartoon eyes and bright smile'})
+Setting: {environment or 'vibrant magical preschool world with sunny skies and rainbow'}
+
+Write ONE single-paragraph, ultra-high CTR 3D Pixar/Disney CGI YouTube cover prompt for AI Image Generators (Wan AI / Flux Dev / Midjourney).
+
+Rules:
+- 3D Disney Pixar CGI animation style, vibrant saturated preschool candy palette, 8K Unreal Engine 5 render.
+- Large expressive glossy cartoon eyes, warm joyful smiles, soft porcelain skin with subsurface scattering.
+- Welcoming dynamic toddler pose, vibrant thematic props, warm golden sunny rim lighting with volumetric sunbeams.
+- Must end with: 'strictly NO text, NO words, NO letters, NO watermark, NO logo.'
+- Return ONLY the final prompt text string, with no introduction, quotes, or markdown."""
+        ai_res = provider.generate(ai_req, "You are a master 3D Pixar thumbnail prompt creator. Return only the prompt string.")
+        if ai_res and len(ai_res.strip()) > 50:
+            clean_prompt = ai_res.strip().replace('"', '').replace('\n', ' ')
+            if "no text" not in clean_prompt.lower():
+                clean_prompt += ", strictly NO text, NO words, NO letters, NO watermark, NO logo."
+            return clean_prompt
+    except Exception as e:
+        logger.debug(f"DeepSeek dynamic thumbnail prompt generation fallback: {e}")
 
     clean_lower = clean_topic.lower()
 

@@ -28,6 +28,7 @@ import {
   ExternalLink,
   ImageIcon,
   Upload,
+  RefreshCw,
 } from "lucide-react";
 
 interface StoryboardViewProps {
@@ -79,6 +80,10 @@ export function StoryboardView({
   const [assembling, setAssembling] = useState(false);
   const [finalVideoResult, setFinalVideoResult] = useState<{ status: string; final_video: string; duration: number } | null>(null);
   const [assembleError, setAssembleError] = useState<string | null>(null);
+  const [thumbnailPrompt, setThumbnailPrompt] = useState<string>("");
+  const [copiedThumbnailPrompt, setCopiedThumbnailPrompt] = useState(false);
+  const [regeneratingThumb, setRegeneratingThumb] = useState(false);
+  const [thumbTimestamp, setThumbTimestamp] = useState<number>(Date.now());
 
   const handleRunAiMatch = async () => {
     if (!projectId) return;
@@ -142,7 +147,13 @@ export function StoryboardView({
     api.getAISettings().then(setAiSettings).catch(() => {});
     if (projectId) {
       api.getCopyStatus(projectId).then(setCopyStatus).catch(() => {});
+      api.getThumbnailPrompt(projectId).then((tp) => {
+        if (tp && tp.prompt) setThumbnailPrompt(tp.prompt);
+      }).catch(() => {});
       api.checkAssemblyReadiness(projectId).then((readyData) => {
+        if (readyData.thumbnail_prompt) {
+          setThumbnailPrompt(readyData.thumbnail_prompt);
+        }
         if (readyData.final_video_exists) {
           setFinalVideoResult({
             status: "completed",
@@ -1168,6 +1179,60 @@ ${prompt}`;
                 <div className="absolute bottom-2 right-2 px-2 py-0.5 rounded-md bg-black/80 text-white text-[10px] font-bold backdrop-blur-xs">
                   16:9 • 1280x720
                 </div>
+              </div>
+            </div>
+
+            {/* AI Thumbnail Prompt Box (DeepSeek Generated + Wan AI / Fal Flux Image) */}
+            <div className="mt-4 p-4 rounded-2xl bg-white border border-amber-200 shadow-xs space-y-2.5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-amber-500" />
+                  <span className="text-xs font-extrabold text-[#1D1D1F]">
+                    3D Pixar YouTube Thumbnail AI Prompt
+                  </span>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200">
+                    🤖 DeepSeek Prompt
+                  </span>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-50 text-purple-800 border border-purple-200">
+                    🎬 Wan AI / Fal Flux Image
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={async () => {
+                      if (!thumbnailPrompt) return;
+                      await navigator.clipboard.writeText(thumbnailPrompt);
+                      setCopiedThumbnailPrompt(true);
+                      setTimeout(() => setCopiedThumbnailPrompt(false), 2000);
+                    }}
+                    className="px-2.5 py-1 text-[11px] font-bold bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-lg flex items-center gap-1 transition-all cursor-pointer"
+                  >
+                    {copiedThumbnailPrompt ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copiedThumbnailPrompt ? "Prompt Copied!" : "Copy Prompt"}</span>
+                  </button>
+                  <button
+                    onClick={async () => {
+                      setRegeneratingThumb(true);
+                      try {
+                        const res = await api.generateThumbnail(projectId);
+                        if (res && res.thumbnail_prompt) setThumbnailPrompt(res.thumbnail_prompt);
+                        setThumbTimestamp(Date.now());
+                      } catch (e: any) {
+                        alert("Failed to regenerate thumbnail: " + (e?.message || e));
+                      } finally {
+                        setRegeneratingThumb(false);
+                      }
+                    }}
+                    disabled={regeneratingThumb}
+                    className="px-2.5 py-1 text-[11px] font-bold bg-purple-600 hover:bg-purple-700 text-white rounded-lg flex items-center gap-1 transition-all disabled:opacity-50 cursor-pointer"
+                  >
+                    {regeneratingThumb ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                    <span>{regeneratingThumb ? "Generating…" : "Regenerate Thumbnail"}</span>
+                  </button>
+                </div>
+              </div>
+              <div className="p-3 bg-amber-50/50 rounded-xl border border-amber-100 font-mono text-[11px] text-[#1D1D1F] leading-relaxed select-text max-h-32 overflow-y-auto">
+                {thumbnailPrompt || "Generating DeepSeek 3D Pixar YouTube thumbnail prompt…"}
               </div>
             </div>
           </div>
