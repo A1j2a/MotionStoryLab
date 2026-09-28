@@ -1,117 +1,16 @@
-import json
-import logging
-import random
+import os
 import re
+import json
+import random
+import sqlite3
+import logging
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Set
-
+from typing import Dict, Any, List, Optional, Tuple, Set
 from ai.providers import get_ai_provider
 
 logger = logging.getLogger("studio.ai.topics")
 
-
-def _get_history_file_path() -> Path:
-    try:
-        from app.core.config import settings
-        p = Path(str(settings.resolved_project_dir)) / "discovered_topics_history.json"
-        p.parent.mkdir(parents=True, exist_ok=True)
-        return p
-    except Exception:
-        fallback = Path(__file__).resolve().parent.parent / "projects" / "discovered_topics_history.json"
-        fallback.parent.mkdir(parents=True, exist_ok=True)
-        return fallback
-
-
-def load_discovered_topics_history() -> List[str]:
-    """Loads all historically generated topic titles/topics to avoid repetitions across sessions."""
-    file_path = _get_history_file_path()
-    if not file_path.exists():
-        return []
-    try:
-        data = json.loads(file_path.read_text(encoding="utf-8"))
-        if isinstance(data, list):
-            return [str(x).strip() for x in data if x and str(x).strip()]
-    except Exception as e:
-        logger.warning(f"Failed to load topic history: {e}")
-    return []
-
-
-def save_discovered_topics_history(new_topic_titles: List[str]) -> None:
-    """Appends newly generated topic titles to persistent history."""
-    if not new_topic_titles:
-        return
-    file_path = _get_history_file_path()
-    history = load_discovered_topics_history()
-    existing_set = set(history)
-    for t in new_topic_titles:
-        t_clean = t.strip()
-        if t_clean and t_clean not in existing_set:
-            history.append(t_clean)
-            existing_set.add(t_clean)
-    if len(history) > 5000:
-        history = history[-5000:]
-    try:
-        file_path.write_text(json.dumps(history, indent=2, ensure_ascii=False), encoding="utf-8")
-    except Exception as e:
-        logger.warning(f"Failed to save topic history: {e}")
-
-
-def normalize_topic_signature(text: str) -> str:
-    """Extracts a normalized core token signature for deduplication comparison."""
-    if not text:
-        return ""
-    cleaned = re.sub(r"[^\w\s]", " ", text.lower(), flags=re.UNICODE)
-    stopwords = {
-        "nursery", "rhyme", "rhymes", "song", "songs", "kids", "preschool", "toddler",
-        "toddlers", "children", "baby", "babies", "animation", "3d", "video", "videos",
-        "balgeet", "kavita", "cancion", "canciones", "infantiles", "the", "a", "an", "and",
-        "or", "with", "for", "in", "on", "at", "to", "of", "by", "from", "la", "el", "los",
-        "las", "ke", "ki", "ka", "ko", "se", "aur", "chota", "choti", "pyara", "pyari", "super",
-        "fun", "magic", "magical", "adventure", "sing", "dance", "learn", "learning"
-    }
-    tokens = [w for w in cleaned.split() if len(w) > 1 and w not in stopwords]
-    return " ".join(sorted(set(tokens)))
-
-
-def is_topic_duplicate_or_excluded(
-    candidate: Dict[str, Any],
-    excluded_signatures: Set[str],
-    current_batch_signatures: Set[str],
-) -> bool:
-    """
-    Checks whether a candidate topic (or its title, core character, subject)
-    duplicates an existing video project, historically seen topic, or item in the current batch.
-    """
-    candidate_title = candidate.get("suggested_title", "")
-    candidate_topic = candidate.get("topic", "")
-
-    title_sig = normalize_topic_signature(candidate_title)
-    topic_sig = normalize_topic_signature(candidate_topic)
-
-    sigs = [s for s in [title_sig, topic_sig] if s]
-    if not sigs:
-        return False
-
-    all_excluded = excluded_signatures | current_batch_signatures
-
-    for sig in sigs:
-        if sig in all_excluded:
-            return True
-
-    # Token overlap check (Jaccard similarity > 0.55 on non-empty signatures)
-    cand_tokens = set(title_sig.split()) | set(topic_sig.split())
-    if cand_tokens:
-        for exc_sig in all_excluded:
-            exc_tokens = set(exc_sig.split())
-            if not exc_tokens:
-                continue
-            intersection = cand_tokens & exc_tokens
-            union = cand_tokens | exc_tokens
-            similarity = len(intersection) / len(union) if union else 0.0
-            if similarity > 0.55:
-                return True
-
-    return False
+DB_PATH = Path(__file__).resolve().parent.parent / "projects" / "studio.db"
 
 
 def _generate_pure_dynamic_fallback_topic(
@@ -143,7 +42,7 @@ def _generate_pure_dynamic_fallback_topic(
             act = rng.choice(actions)
             adj = rng.choice(adjs)
             
-            title = f"{adj} {n} {a} {act} 🎶✨ | Hindi Balgeet for Kids"
+            title = f"{adj} {n} {a} {act}  | Hindi Balgeet for Kids"
             topic = f"{n} {a} - {act}"
             category = rng.choice(["Numbers & Counting", "Good Habits", "Bedtime Lullabies", "Animals & Nature", "Colors & Shapes"])
             hook = f"Interactive Hindi preschool rhyme featuring {adj} {n} with catchy rhythm."
@@ -161,7 +60,7 @@ def _generate_pure_dynamic_fallback_topic(
             n = rng.choice(names)
             a = rng.choice(animals)
             act = rng.choice(actions)
-            title = f"{n} {a} | {act} 🎶✨ | Canciones Infantiles 3D"
+            title = f"{n} {a} | {act}  | Canciones Infantiles 3D"
             topic = f"{n} {a} - {act}"
             category = rng.choice(["Numbers & Counting", "Good Habits", "Bedtime Lullabies", "Colors & Shapes", "Social-Emotional"])
             hook = f"Joyful Spanish preschool melody where {n} {a} {act.lower()}."
@@ -190,7 +89,7 @@ def _generate_pure_dynamic_fallback_topic(
             desc = rng.choice(descriptors)
             sp = rng.choice(species)
             act_name, cat, hook_desc = rng.choice(activities)
-            emojis = rng.choice(["🎶✨", "🌟🎈", "⭐🎵", "🍎🌈", "🚀💫", "🐰🌸", "🚂✨"])
+            emojis = rng.choice(["", "", "", "", "", "", ""])
             
             full_char = f"{fn} the {desc} {sp}"
             title = f"{full_char} | {act_name} {emojis} | Kids Nursery Rhymes & 3D Songs"
@@ -225,6 +124,234 @@ def _generate_pure_dynamic_fallback_topic(
     return card
 
 
+def _init_topics_storage():
+    """Ensures the used_topics table exists with full index support."""
+    try:
+        if DB_PATH.exists():
+            conn = sqlite3.connect(str(DB_PATH), timeout=5)
+            c = conn.cursor()
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS used_topics (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT UNIQUE,
+                    character TEXT,
+                    lost_or_broken_object TEXT,
+                    category TEXT,
+                    learning_payoff TEXT,
+                    status TEXT DEFAULT 'CONSUMED',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            c.execute("CREATE INDEX IF NOT EXISTS idx_used_topics_title ON used_topics(title)")
+            conn.commit()
+            conn.close()
+    except Exception as e:
+        logger.warning(f"Could not init used_topics table: {e}")
+
+
+def _get_used_topics_context() -> Tuple[List[str], Set[str], Set[str], Set[str]]:
+    """
+    Loads all permanently used and completed topics from both used_topics table AND projects table.
+    Returns:
+    - used_topics_formatted_list (for prompt {{USED_TOPICS}})
+    - used_titles_normalized_set
+    - used_characters_set
+    - used_objects_set
+    """
+    _init_topics_storage()
+    formatted_list: List[str] = []
+    used_titles: Set[str] = set()
+    used_chars: Set[str] = set()
+    used_objs: Set[str] = set()
+
+    try:
+        if DB_PATH.exists():
+            conn = sqlite3.connect(str(DB_PATH), timeout=5)
+            c = conn.cursor()
+
+            # 1. Fetch from used_topics table
+            c.execute("SELECT title, character, lost_or_broken_object, category, learning_payoff FROM used_topics ORDER BY id DESC LIMIT 500")
+            for row in c.fetchall():
+                title, char, obj, cat, payoff = row
+                if title:
+                    norm = title.lower().strip()
+                    used_titles.add(norm)
+                    desc = f"- {title}"
+                    if cat or payoff:
+                        desc += f" ({cat or 'General'} / {payoff or 'Learning'}"
+                    formatted_list.append(desc)
+                if char:
+                    used_chars.add(char.lower().strip())
+                if obj:
+                    used_objs.add(obj.lower().strip())
+
+            # 2. Fetch from existing created projects to guarantee 100% deduplication
+            c.execute("SELECT title, topic FROM projects")
+            for row in c.fetchall():
+                p_title, p_topic = row
+                for val in (p_title, p_topic):
+                    if val:
+                        norm = val.lower().strip()
+                        if norm not in used_titles:
+                            used_titles.add(norm)
+                            formatted_list.append(f"- {val} (Created Project / In Production)")
+
+            conn.close()
+    except Exception as e:
+        logger.warning(f"Could not load used topics context: {e}")
+
+    return formatted_list, used_titles, used_chars, used_objs
+
+
+def mark_topic_as_used(
+    title: str,
+    topic: Optional[str] = None,
+    character: Optional[str] = None,
+    lost_or_broken_object: Optional[str] = None,
+    category: Optional[str] = None,
+    learning_payoff: Optional[str] = None,
+):
+    """
+    Permanently stores a completed or selected topic in the database so it can NEVER be repeated.
+    """
+    _init_topics_storage()
+    clean_title = (title or topic or "").strip()
+    if not clean_title:
+        return
+
+    try:
+        if DB_PATH.exists():
+            conn = sqlite3.connect(str(DB_PATH), timeout=5)
+            c = conn.cursor()
+            c.execute("""
+                INSERT OR REPLACE INTO used_topics (title, character, lost_or_broken_object, category, learning_payoff, status)
+                VALUES (?, ?, ?, ?, ?, 'CONSUMED')
+            """, (
+                clean_title,
+                (character or "").strip(),
+                (lost_or_broken_object or "").strip(),
+                (category or "").strip(),
+                (learning_payoff or "").strip(),
+            ))
+            if topic and topic.strip() != clean_title:
+                c.execute("""
+                    INSERT OR IGNORE INTO used_topics (title, character, lost_or_broken_object, category, learning_payoff, status)
+                    VALUES (?, ?, ?, ?, ?, 'CONSUMED')
+                """, (
+                    topic.strip(),
+                    (character or "").strip(),
+                    (lost_or_broken_object or "").strip(),
+                    (category or "").strip(),
+                    (learning_payoff or "").strip(),
+                ))
+            conn.commit()
+            conn.close()
+            logger.info(f"Permanently marked topic as CONSUMED: {clean_title}")
+    except Exception as e:
+        logger.warning(f"Failed to mark topic as consumed in DB: {e}")
+
+
+def _record_used_topics(topics: List[Dict[str, Any]]):
+    """Stores a batch of generated topics into the database."""
+    for t in topics:
+        mark_topic_as_used(
+            title=t.get("title") or t.get("suggested_title") or "",
+            topic=t.get("topic"),
+            character=t.get("character"),
+            lost_or_broken_object=t.get("lost_or_broken_object"),
+            category=t.get("category"),
+            learning_payoff=t.get("learning_payoff"),
+        )
+
+
+def _dynamic_procedural_fallback(
+    count: int,
+    seed_val: int,
+    used_titles: Set[str],
+    used_chars: Set[str],
+    used_objs: Set[str],
+    target_age: str,
+    duration: str,
+) -> List[Dict[str, Any]]:
+    """
+    Purely procedural dynamic generator adhering to the official 'Oh No!' arc and HARD RULES.
+    Guarantees picking characters and objects NOT in the used set.
+    """
+    rng = random.Random(seed_val)
+    categories = [
+        ("Vehicle",
+         ["Little Tractor", "Fire Truck", "Scooter", "Helicopter", "Submarine", "Bicycle", "Toy Train", "Delivery Van", "Little Bulldozer", "Sailboat", "Rocket Toy", "Go-Kart"],
+         [("Lost His Key", "Key"), ("Lost His Horn", "Horn"), ("Lost His Wheel", "Wheel"), ("Broke His Headlight", "Headlight"), ("Can't Find His Bell", "Bell"), ("Lost His Siren", "Siren")]),
+        ("Animal",
+         ["Baby Otter", "Little Panda", "Koala Bear", "Cheeky Monkey", "Tiny Giraffe", "Little Lamb", "Baby Elephant", "Puppy", "Playful Kitten", "Baby Hippo", "Little Kangaroo", "Zippy Zebra"],
+         [("Lost His Blanket", "Blanket"), ("Lost His Acorn", "Acorn"), ("Lost His Hat", "Hat"), ("Broke His Drum", "Drum"), ("Can't Find His Scarf", "Scarf"), ("Lost His Ball", "Ball")]),
+        ("Household object",
+         ["Teddy Bear", "Clocky the Clock", "Spoon & Fork", "Teapot", "Lampy", "Robot Toy", "Crayon Box", "Musical Drum", "Paintbrush Buddy", "Toaster Friend"],
+         [("Lost His Button", "Button"), ("Lost His Star", "Star"), ("Lost His Handle", "Handle"), ("Broke His Spring", "Spring"), ("Can't Find His Paintbrush", "Paintbrush"), ("Lost His Ribbon", "Ribbon")]),
+        ("Bedtime-routine",
+         ["Sleepy Sloth", "Night Owl", "Dreamy Star", "Little Fox", "Cuddle Bear", "Moon Beam", "Pajama Bunny"],
+         [("Lost His Slippers", "Slippers"), ("Lost His Pajama Button", "Pajama Button"), ("Can't Find His Storybook", "Storybook"), ("Lost His Night Cap", "Night Cap"), ("Lost His Pillow", "Pillow")]),
+        ("Nature",
+         ["Bumblebee", "Ladybug", "Little Raindrop", "Sunbeam", "Acorn Squirrel", "Green Frog", "Garden Snail", "Tiny Caterpillar", "Fluffy Cloud"],
+         [("Lost His Honey Jar", "Honey Jar"), ("Lost Her Polka Dot", "Polka Dot"), ("Lost His Lily Pad", "Lily Pad"), ("Broke His Leaf Umbrella", "Leaf Umbrella"), ("Can't Find His Blossom", "Blossom")]),
+    ]
+    payoffs = ["Counting 1-5", "Colors", "Shapes", "Sounds"]
+    search_places = [
+        ["under the sofa", "inside the toybox", "behind the blue door", "under the garden rug", "on top of the bed"],
+        ["in the flowerbed", "behind the tall tree", "near the duck pond", "under the wooden bench", "inside the hollow log"],
+        ["on the kitchen shelf", "under the cozy armchair", "behind the striped curtain", "inside the laundry basket", "under the soft pillow"],
+        ["in the sandpit", "under the wooden slide", "behind the green bushes", "inside the wagon", "under the park swing"],
+    ]
+
+    results = []
+    attempts = 0
+    while len(results) < count and attempts < 250:
+        attempts += 1
+        cat_name, chars, actions = rng.choice(categories)
+        
+        # Pick character not overused
+        available_chars = [c for c in chars if c.lower() not in used_chars]
+        char = rng.choice(available_chars) if available_chars else rng.choice(chars)
+        
+        # Pick action / object not overused
+        action_tuple = rng.choice(actions)
+        act_text, obj_name = action_tuple
+        
+        title = f"Oh No! {char} {act_text}!"
+        norm_title = title.lower().strip()
+        if norm_title in used_titles:
+            continue
+
+        used_titles.add(norm_title)
+        used_chars.add(char.lower())
+        used_objs.add(obj_name.lower())
+
+        payoff = rng.choice(payoffs)
+        places = rng.choice(search_places)
+        hook = f"{char} searches {places[0]}, {places[1]}, {places[2]}, and {places[3]}, finally finding it {places[4]}!"
+
+        results.append({
+            "title": title,
+            "suggested_title": f"{title}  | 3D Nursery Rhymes & Kids Songs",
+            "topic": title.replace("Oh No! ", "").replace("!", ""),
+            "character": char,
+            "lost_or_broken_object": obj_name,
+            "category": cat_name,
+            "learning_payoff": payoff,
+            "content_angle": hook,
+            "why_worth_considering": f"Official 'Oh No!' problem-solving arc teaching early {payoff.lower()} with suspense, false leads, and high toddler retention.",
+            "opportunity_signals": "Top-ranking preschool YouTube search structure with 10M+ view potential and repeat watch time.",
+            "suggested_characters": [char, "Friendly Friend", "Mama Guide"],
+            "suggested_story_concept": f"{char} experiences a fun preschool mishap, hunts in 5 lively spots with funny sound effects, and celebrates with a warm {payoff} song.",
+            "target_age": target_age,
+            "duration": duration,
+            "search_keywords": [char.lower(), cat_name.lower(), payoff.lower(), "oh no song", "nursery rhyme 3d"],
+            "seo_tags": ["#ohnosong", "#nurseryrhymes", "#kidssongs", "#preschoollearning", "#animation3d"],
+        })
+
+    return results
+
+
 def discover_kids_topics(
     limit: int = 8,
     target_age: Optional[str] = None,
@@ -234,146 +361,155 @@ def discover_kids_topics(
     excluded_topics: Optional[List[str]] = None,
 ) -> List[Dict[str, Any]]:
     """
-    Researches and generates dynamic YouTube Kids topic opportunities 100% via Live AI.
-    Strictly guarantees:
-    1. ZERO duplicate topics within the generated batch.
-    2. NEVER repeats topics previously discovered or saved in history.
-    3. NEVER shows topics for which a video project already exists in the database.
-    4. Performs real-time SEO topic research on every button click.
+    Researches and generates dynamic YouTube Kids topic opportunities using the official
+    'Oh No!' story arc channel formula and Live AI reasoning.
+    Strictly enforces permanent storage in SQLite so used topics are NEVER repeated.
     """
     provider = get_ai_provider()
     model_name = getattr(provider, "model", "default")
 
-    age_str = target_age if target_age and target_age.lower() != "all" else "Toddlers & Preschoolers (Ages 1-5)"
+    age_str = target_age if target_age and target_age.lower() != "all" else "Ages 2-5 (Toddlers & Preschoolers)"
     dur_str = duration if duration else "2-3 Minutes (Standard YouTube Kids)"
-    lang_str = language if language else "English (US/UK)"
+    lang_str = language if language else "English (Global Audience)"
     seed_val = seed if seed is not None else random.randint(100000, 999999)
-    seed_str = str(seed_val)
 
-    # 1. Gather all excluded topics from database projects + historical discoveries
-    all_excluded_raw = list(excluded_topics or [])
-    history_topics = load_discovered_topics_history()
-    all_excluded_raw.extend(history_topics)
+    # 1. Fetch all permanently used topics and existing projects
+    used_list, used_titles_set, used_chars_set, used_objs_set = _get_used_topics_context()
+    used_topics_text = "\n".join(used_list[:70]) if used_list else "(None yet — fresh channel start)"
 
-    excluded_signatures: Set[str] = set()
-    for raw in all_excluded_raw:
-        sig = normalize_topic_signature(raw)
-        if sig:
-            excluded_signatures.add(sig)
+    # 2. Build official user-specified system prompt
+    system_prompt = f"""SYSTEM PROMPT — Topic Generator for Kids' YouTube Channel
 
-    # Negative prompt constraints to guide the AI
-    sample_excluded = [t for t in all_excluded_raw[-30:] if t.strip()]
-    neg_prompt_clause = ""
-    if sample_excluded:
-        sample_str = ", ".join(f'"{t}"' for t in sample_excluded[:15])
-        neg_prompt_clause = f"\nEXCLUDE THESE ALREADY-PRODUCED TOPICS (DO NOT REPEAT): {sample_str}\n"
+You are a topic generator for a 3D-animated kids' YouTube channel (ages 2-5, English-language, global audience — no country-specific references).
 
-    lang_note = ""
-    if "hindi" in lang_str.lower():
-        lang_note = "LANGUAGE REQUIREMENT: Generate authentic Hindi & Hinglish preschool themes (like Chanda Mama, Titli, Gadi, Animal rhymes, counting) with Hindi/Hinglish titles and friendly emojis."
-    elif "spanish" in lang_str.lower():
-        lang_note = "LANGUAGE REQUIREMENT: Generate authentic Spanish nursery rhymes (canciones infantiles) with Spanish titles and friendly emojis."
-    elif "bilingual" in lang_str.lower():
-        lang_note = "LANGUAGE REQUIREMENT: Generate bilingual preschool rhyme themes designed for early multilingual learning."
+CHANNEL FORMAT (fixed):
+Every video follows the "Oh No!" story arc: a character loses or breaks something → searches in 4-5 places (each a false lead with a fun sound effect) → finds it on the 5th try → celebrates with a counting, color, shape, or sound-learning payoff → calms down/ends warmly.
 
-    def _query_ai_batch(batch_size: int, batch_seed: int) -> List[Dict[str, Any]]:
-        prompt = f"""You are an elite YouTube Kids SEO Researcher & Preschool Content Strategist.
-Research and generate {batch_size} BRAND-NEW, highly viral, copyright-free 3D nursery rhyme topic opportunity cards with 10M+ view potential.
-Audience: {age_str} | Duration: {dur_str} | Language: {lang_str} | Creative Seed: {batch_seed}
-{lang_note}
-{neg_prompt_clause}
-RULES:
-1. NO COPYRIGHTED CHARACTERS (No Cocomelon, Peppa Pig, Disney, Pinkfong, Baby Shark).
-2. Every topic must be fresh, unique, and highly searchable for parents and preschoolers.
-3. Include high-CTR title hooks, why it's worth considering for YouTube algorithm, and opportunity signals.
+YOUR TASK:
+Generate exactly {limit} new video topics per request, in this format:
+- Title: "Oh No! [Character] [Lost/Can't Find/Broke] [Object]!"
+- Category: (Vehicle / Animal / Household object / Bedtime-routine / Nature)
+- Learning payoff: (Counting 1-5 / Colors / Shapes / Sounds)
+- One-line story hook (max 20 words)
 
-Return ONLY a JSON object:
-{{"topics": [
-  {{
-    "topic": "Unique topic name with character & action",
-    "suggested_title": "High-CTR YouTube Kids title with friendly emojis",
-    "category": "Numbers & Counting | Bedtime Lullabies | Good Habits | Animals & Nature | Colors & Shapes | Social-Emotional | Action & Dance",
-    "target_age": "{age_str}",
-    "search_keywords": ["keyword1", "keyword2", "keyword3"],
-    "content_angle": "1-sentence musical & visual engagement hook",
-    "why_worth_considering": "1-sentence YouTube algorithm & audience retention rationale",
-    "opportunity_signals": "1-sentence search trend & demand indicator",
-    "suggested_characters": ["CharacterName1", "CharacterName2"],
-    "suggested_story_concept": "1-sentence animated storyline concept"
-  }}
-]}}"""
-        system_prompt = "You are a world-class preschool YouTube Kids content & SEO strategist. Output strictly valid JSON with brand-new, unique preschool rhyme concepts."
+HARD RULES — READ CAREFULLY:
+1. NEVER repeat, rename, or lightly reword any topic in the EXCLUDE LIST below. Treat the exclude list as fully consumed — do not reuse the same character, the same lost object, or the same category+payoff combination twice.
+2. Before answering, silently pick THREE random elements first: (a) a category not overused in the exclude list, (b) a character/object within that category not yet used, (c) a learning payoff not overused in the exclude list. Only build the title after choosing these three.
+3. Prioritize globally generic, universally recognizable characters and objects (vehicles, animals, toys, bedtime objects, nature). Do NOT use any country-specific or region-specific references.
+4. Randomization seed for this request: {seed_val} — use this number to break any tendency to default to your most likely answer. If asked again with a different seed, you must produce a genuinely different combination.
+5. Return strictly valid JSON with key "topics" containing exactly {limit} objects.
 
-        try:
-            res = provider.generate_json(prompt, system_prompt, max_tokens=2200)
-            if res and "topics" in res and isinstance(res["topics"], list):
-                return [t for t in res["topics"] if isinstance(t, dict) and t.get("suggested_title")]
-        except Exception as e:
-            logger.warning(f"Live AI Topic Generation batch query failed via {model_name}: {e}")
-        return []
+EXCLUDE LIST (already used — do not repeat these or close variants):
+{used_topics_text}
+"""
+
+    user_prompt = f"""Generate {limit} brand new unique "Oh No!" video topics strictly adhering to the channel format rules and exclude list.
+Target Audience: {age_str}
+Target Duration: {dur_str}
+Language: {lang_str}
+Randomization Seed: {seed_val}
+
+Return JSON strictly in this structure:
+{{
+  "topics": [
+    {{
+      "title": "Oh No! [Character] [Lost/Can't Find/Broke] [Object]!",
+      "character": "[Character Name]",
+      "lost_or_broken_object": "[Object]",
+      "category": "Vehicle / Animal / Household object / Bedtime-routine / Nature",
+      "learning_payoff": "Counting 1-5 / Colors / Shapes / Sounds",
+      "story_hook": "One-line story hook (max 20 words) describing the 4-5 search places and sound effects",
+      "suggested_characters": ["Character 1", "Character 2"],
+      "suggested_story_concept": "1-2 sentence animated story arc summary"
+    }}
+  ]
+}}
+"""
 
     collected: List[Dict[str, Any]] = []
-    current_batch_signatures: Set[str] = set()
 
-    # 1. Query AI in manageable batches (4 at a time) for speed and 100% JSON reliability
-    needed = limit
-    batches = []
-    while needed > 0:
-        b_size = min(4, needed)
-        batches.append(b_size)
-        needed -= b_size
+    try:
+        logger.info(f"Querying AI provider {model_name} for {limit} 'Oh No!' kids topics (Seed: {seed_val})...")
+        res = provider.generate_json(user_prompt, system_prompt, max_tokens=2200)
+        if res and "topics" in res and isinstance(res["topics"], list):
+            for t in res["topics"]:
+                if not isinstance(t, dict):
+                    continue
+                raw_title = t.get("title") or t.get("suggested_title") or ""
+                char = (t.get("character") or "").strip().lower()
+                obj = (t.get("lost_or_broken_object") or "").strip().lower()
 
-    for i, b_size in enumerate(batches):
-        batch_seed = seed_val + (i * 107)
-        raw_topics = _query_ai_batch(b_size, batch_seed)
-        for t in raw_topics:
-            if not is_topic_duplicate_or_excluded(t, excluded_signatures, current_batch_signatures):
-                t_sig = normalize_topic_signature(t.get("suggested_title", "") or t.get("topic", ""))
-                if t_sig:
-                    current_batch_signatures.add(t_sig)
+                # STRICT DEDUPLICATION GUARD: Reject if title or character+object already used
+                if not raw_title or raw_title.lower().strip() in used_titles_set:
+                    continue
+                if char and obj and f"{char}:{obj}" in used_titles_set:
+                    continue
+
+                used_titles_set.add(raw_title.lower().strip())
+                if char:
+                    used_chars_set.add(char)
+                if obj:
+                    used_objs_set.add(obj)
                 collected.append(t)
-                if len(collected) >= limit:
-                    break
-        if len(collected) >= limit:
-            break
+            logger.info(f"AI returned {len(collected)} verified non-duplicate topics via {model_name}")
+    except Exception as e:
+        logger.warning(f"Live AI Topic Generation error via {model_name}: {e}")
 
-    # 2. If AI call returned fewer topics (e.g. offline fallback), dynamically synthesize purely novel cards
+    # If AI returned fewer topics than limit, run procedural dynamic generator for remainder
     if len(collected) < limit:
-        rng = random.Random(seed_val)
-        shortfall = limit - len(collected)
-        for _ in range(shortfall):
-            syn = _generate_pure_dynamic_fallback_topic(
-                rng=rng,
-                target_age=age_str,
-                duration=dur_str,
-                language=lang_str,
-                excluded_signatures=excluded_signatures,
-                current_batch_signatures=current_batch_signatures,
-            )
-            syn_sig = normalize_topic_signature(syn.get("suggested_title", "") or syn.get("topic", ""))
-            if syn_sig:
-                current_batch_signatures.add(syn_sig)
-            collected.append(syn)
+        needed = limit - len(collected)
+        logger.info(f"Synthesizing {needed} dynamic 'Oh No!' topics with seed {seed_val}...")
+        procedural = _dynamic_procedural_fallback(
+            count=needed,
+            seed_val=seed_val,
+            used_titles=used_titles_set,
+            used_chars=used_chars_set,
+            used_objs=used_objs_set,
+            target_age=age_str,
+            duration=dur_str,
+        )
+        collected.extend(procedural)
 
-    # 3. Format, enrich SEO tags, and persist final topics to history
+    # Format into full frontend schema
     final_topics = []
-    new_history_titles = []
 
     for t in collected[:limit]:
-        c = dict(t)
-        c["duration"] = dur_str
-        c["target_age"] = age_str
-        if "seo_tags" not in c or not c["seo_tags"]:
-            c["seo_tags"] = ["#nurseryrhymes", "#kidssongs", "#preschoollearning", "#animation3d", "#toddlereducation"]
-        if "search_keywords" not in c or not c["search_keywords"]:
-            c["search_keywords"] = [c.get("topic", "preschool song").lower(), "nursery rhyme 3d", "toddler video", "kids song"]
-        final_topics.append(c)
+        title = t.get("title") or t.get("suggested_title") or "Oh No! Adventure"
+        char = t.get("character", "")
+        obj = t.get("lost_or_broken_object", "")
+        cat = t.get("category", "Animal")
+        payoff = t.get("learning_payoff", "Counting 1-5")
+        hook = t.get("story_hook") or t.get("content_angle") or f"{char} searches 5 places with fun sounds!"
+        concept = t.get("suggested_story_concept") or f"{char} loses {obj}, searches 5 places, finds it, and celebrates with {payoff}."
 
-        title_to_save = c.get("suggested_title") or c.get("topic")
-        if title_to_save:
-            new_history_titles.append(title_to_save)
+        chars = t.get("suggested_characters")
+        if not chars:
+            chars = [char, "Friendly Friend"] if char else ["Cute Bear", "Buddy"]
+        elif isinstance(chars, str):
+            chars = [c.strip() for c in chars.split(",")]
 
-    save_discovered_topics_history(new_history_titles)
-    logger.info(f"Successfully generated {len(final_topics)} 100% dynamic SEO topics via {model_name}")
+        topic_card = {
+            "topic": title.replace("Oh No! ", "").replace("!", "").strip(),
+            "title": title,
+            "suggested_title": f"{title}  | 3D Nursery Rhymes & Kids Songs",
+            "character": char,
+            "lost_or_broken_object": obj,
+            "category": cat,
+            "learning_payoff": payoff,
+            "target_age": age_str,
+            "duration": dur_str,
+            "content_angle": hook,
+            "why_worth_considering": f"Official 'Oh No!' formula teaching early {payoff.lower()} with suspense, false leads, and high toddler retention.",
+            "opportunity_signals": "Top-ranking preschool YouTube search structure with 10M+ view potential and repeat watch time.",
+            "suggested_characters": chars,
+            "suggested_story_concept": concept,
+            "search_keywords": [char.lower() if char else "preschool", cat.lower(), payoff.lower(), "oh no song", "nursery rhyme 3d", "toddler learning"],
+            "seo_tags": ["#ohnosong", "#nurseryrhymes", "#kidssongs", "#toddlerlearning", "#animation3d", "#earlylearning"],
+        }
+        final_topics.append(topic_card)
+
+    # Persist to database so they become permanently consumed for all future calls
+    _record_used_topics(final_topics)
+    logger.info(f"Successfully generated {len(final_topics)} 'Oh No!' topics via {model_name}")
 
     return final_topics

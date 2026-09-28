@@ -44,7 +44,7 @@ async def get_discovered_topics(
     session: AsyncSession = Depends(get_db_session),
 ):
     """
-    Step 1: '🔥 Find Today's Kids Topics'
+    Step 1: ' Find Today's Kids Topics'
     Researches current kids topic opportunities exclusively from Live AI with custom filters.
     Strictly filters out and excludes any topics that already have projects/videos in the database,
     and guarantees zero duplicate or repeat topics across discoveries.
@@ -126,6 +126,14 @@ async def select_topic_and_create_project(
     )
     created = await project_repo.create(project)
 
+    # Permanently store selected topic in consumed/used storage to guarantee zero repeats
+    from ai.topic_researcher import mark_topic_as_used
+    mark_topic_as_used(
+        title=payload.title,
+        topic=payload.topic,
+        category=payload.category,
+    )
+
     # Initialize Job in TOPIC_SELECTED
     await job_repo.create(
         Job(
@@ -137,3 +145,10 @@ async def select_topic_and_create_project(
     )
 
     return created
+
+
+@router.get("/ai-usage", response_model=List[Dict[str, Any]])
+async def get_ai_usage_stats():
+    """Returns AI provider usage stats — call count per model."""
+    from ai.providers import get_ai_usage_stats
+    return get_ai_usage_stats()

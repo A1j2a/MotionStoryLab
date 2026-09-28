@@ -679,3 +679,10 @@ async def test_thumbnail_generation(payload: TestThumbnailRequest):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Thumbnail generation failed: {e}")
+
+
+@router.get("/ai-usage")
+async def get_settings_ai_usage():
+    """Returns AI provider usage stats."""
+    from ai.providers import get_ai_usage_stats
+    return get_ai_usage_stats()

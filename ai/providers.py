@@ -2,22 +2,23 @@ import os
 import re
 import json
 import logging
+import sqlite3
 import urllib.request
 import urllib.error
+from pathlib import Path
 from typing import Dict, Any, List, Optional
 from abc import ABC, abstractmethod
 from ai.json_utils import extract_and_repair_json
 
 logger = logging.getLogger("studio.ai.providers")
 
+_DB_PATH = Path(__file__).resolve().parent.parent / "projects" / "studio.db"
+
 
 def _get_db_config(key: str) -> str:
     try:
-        import sqlite3
-        from pathlib import Path
-        db_path = Path(__file__).resolve().parent.parent / "projects" / "studio.db"
-        if db_path.exists():
-            conn = sqlite3.connect(str(db_path), timeout=5)
+        if _DB_PATH.exists():
+            conn = sqlite3.connect(str(_DB_PATH), timeout=5)
             c = conn.cursor()
             c.execute("SELECT value FROM studio_config WHERE key = ?", (key,))
             row = c.fetchone()
@@ -27,6 +28,68 @@ def _get_db_config(key: str) -> str:
     except Exception:
         pass
     return ""
+
+
+def _record_ai_call(provider: str, model: str) -> None:
+    """Increment call counter for a provider+model pair in SQLite."""
+    try:
+        if not _DB_PATH.exists():
+            return
+        conn = sqlite3.connect(str(_DB_PATH), timeout=5)
+        c = conn.cursor()
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS ai_usage_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                provider TEXT NOT NULL,
+                model TEXT NOT NULL,
+                call_count INTEGER DEFAULT 0,
+                last_used TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(provider, model)
+            )
+        """)
+        c.execute("""
+            INSERT INTO ai_usage_log (provider, model, call_count, last_used)
+            VALUES (?, ?, 1, CURRENT_TIMESTAMP)
+            ON CONFLICT(provider, model) DO UPDATE SET
+                call_count = call_count + 1,
+                last_used = CURRENT_TIMESTAMP
+        """, (provider, model))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.debug(f"AI usage log write skipped: {e}")
+
+
+def get_ai_usage_stats() -> List[Dict[str, Any]]:
+    """Returns all AI provider usage stats sorted by call count."""
+    try:
+        if not _DB_PATH.exists():
+            return []
+        conn = sqlite3.connect(str(_DB_PATH), timeout=5)
+        c = conn.cursor()
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS ai_usage_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                provider TEXT NOT NULL,
+                model TEXT NOT NULL,
+                call_count INTEGER DEFAULT 0,
+                last_used TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(provider, model)
+            )
+        """)
+        c.execute("""
+            SELECT provider, model, call_count, last_used
+            FROM ai_usage_log
+            ORDER BY call_count DESC
+        """)
+        rows = c.fetchall()
+        conn.close()
+        return [
+            {"provider": r[0], "model": r[1], "call_count": r[2], "last_used": r[3]}
+            for r in rows
+        ]
+    except Exception:
+        return []
 
 
 class BaseAIProvider(ABC):
@@ -80,6 +143,7 @@ class OpenRouterProvider(BaseAIProvider):
                 },
                 {"role": "user", "content": prompt},
             ],
+            "include_reasoning": False,
             "temperature": temperature,
             "max_tokens": token_limit,
         }
@@ -119,8 +183,8 @@ class OpenRouterProvider(BaseAIProvider):
                 logger.warning(f"Model '{self.model}' unavailable or credit limit reached (HTTP {e.code}). Attempting automatic fallback to free models...")
                 free_fallbacks = [
                     "openrouter/free",
-                    "inclusionai/ling-3.0-flash-sante:free",
-                    "inclusionai/ling-3.0-flash-fin:free",
+                    "qwen/qwen3.8-27b:free",
+                    "liquid/lfm-2.5-2.6b:free",
                 ]
                 for fb_model in free_fallbacks:
                     try:
@@ -156,12 +220,8 @@ class OpenRouterProvider(BaseAIProvider):
     def generate_json(self, prompt: str, system_prompt: str = "", max_tokens: Optional[int] = None) -> Optional[Dict[str, Any]]:
         raw = self._call_api(prompt, system_prompt, max_tokens=max_tokens)
         if not raw:
-            logger.info("OpenRouter returned no response. Cascading to local Ollama provider...")
-            try:
-                return OllamaProvider().generate_json(prompt, system_prompt, max_tokens=max_tokens)
-            except Exception as e:
-                logger.warning(f"Ollama cascade failed: {e}")
-                return None
+            logger.info("OpenRouter returned no response.")
+            return None
         parsed = extract_and_repair_json(raw)
         if parsed is None:
             logger.warning(f"OpenRouter response unparseable (len: {len(raw)}). Cascading to local Ollama provider...")
@@ -172,12 +232,15 @@ class OpenRouterProvider(BaseAIProvider):
             except Exception as e:
                 logger.warning(f"Ollama cascade failed: {e}")
             self.last_error = f"LLM response could not be parsed into JSON (length: {len(raw)})"
+        else:
+            _record_ai_call("OpenRouter", self.model)
         return parsed
 
     def generate_text(self, prompt: str, system_prompt: str = "", max_tokens: Optional[int] = None) -> Optional[str]:
         raw = self._call_api(prompt, system_prompt, max_tokens=max_tokens)
         if not raw:
             return None
+        _record_ai_call("OpenRouter", self.model)
         return re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
 
 
@@ -228,10 +291,16 @@ class OmniRouteProvider(BaseAIProvider):
         raw = self._call_api(prompt, system_prompt)
         if not raw:
             return None
-        return extract_and_repair_json(raw)
+        result = extract_and_repair_json(raw)
+        if result:
+            _record_ai_call("OmniRoute", self.model)
+        return result
 
     def generate_text(self, prompt: str, system_prompt: str = "", max_tokens: Optional[int] = None) -> Optional[str]:
-        return self._call_api(prompt, system_prompt)
+        result = self._call_api(prompt, system_prompt)
+        if result:
+            _record_ai_call("OmniRoute", self.model)
+        return result
 
 
 class OllamaProvider(BaseAIProvider):
@@ -327,10 +396,16 @@ class OllamaProvider(BaseAIProvider):
         raw = self._call_api(prompt, system_prompt, json_format=True, max_tokens=max_tokens or 2000)
         if not raw:
             return None
-        return extract_and_repair_json(raw)
+        result = extract_and_repair_json(raw)
+        if result:
+            _record_ai_call("Ollama", self.model)
+        return result
 
     def generate_text(self, prompt: str, system_prompt: str = "", max_tokens: Optional[int] = None) -> Optional[str]:
-        return self._call_api(prompt, system_prompt, json_format=False, max_tokens=max_tokens or 2000)
+        result = self._call_api(prompt, system_prompt, json_format=False, max_tokens=max_tokens or 2000)
+        if result:
+            _record_ai_call("Ollama", self.model)
+        return result
 
 
 class ClaudeProvider(BaseAIProvider):
@@ -382,10 +457,16 @@ class ClaudeProvider(BaseAIProvider):
         raw = self._call_api(prompt, system_prompt)
         if not raw:
             return None
-        return extract_and_repair_json(raw)
+        result = extract_and_repair_json(raw)
+        if result:
+            _record_ai_call("Claude", self.model)
+        return result
 
     def generate_text(self, prompt: str, system_prompt: str = "", max_tokens: Optional[int] = None) -> Optional[str]:
-        return self._call_api(prompt, system_prompt)
+        result = self._call_api(prompt, system_prompt)
+        if result:
+            _record_ai_call("Claude", self.model)
+        return result
 
 
 class FallbackAIProvider(BaseAIProvider):

@@ -139,7 +139,7 @@ Return ONLY the formatted song lyrics with stanza headers like [Intro], [Verse 1
             ("[Bridge]", [f"Tiptoe, tiptoe, soft and slow... now jump up high and let it go!", f"Seven, eight, and nine, and ten, let us sing the song again!"]),
             ("[Chorus]", [f"Sing along with {clean_topic} all day long, singing our cheerful preschool song!", f"Clap and dance and spin around, hear the happy rhythm sound!", f"Hip hooray, hip hooray, what a wonderful happy day!"]),
             ("[Verse 4]", [f"The stars are peeking through the blue, saying goodnight to me and you.", f"{clean_topic} gives a friendly smile, resting for a little while."]),
-            ("[Outro]", [f"Thank you friends for singing along, sharing our delightful song!", f"Wave goodbye with {clean_topic} now, take a cheerful final bow! ✨"]),
+            ("[Outro]", [f"Thank you friends for singing along, sharing our delightful song!", f"Wave goodbye with {clean_topic} now, take a cheerful final bow! "]),
         ][:num_stanzas]
 
     formatted_lyrics = "\n\n".join(
@@ -307,21 +307,21 @@ Return a valid JSON object with the following EXACT structure:
     tags = [clean_topic.lower(), f"{clean_topic.lower()} song", "nursery rhymes", "kids songs", "preschool animation", "3d cartoon", "toddler songs"]
 
     full_description = (
-        f"{clean_topic} ✨🎶 | 3D Nursery Rhymes & Kids Songs\n\n"
+        f"{clean_topic}  | 3D Nursery Rhymes & Kids Songs\n\n"
         f"Welcome to a fun and musical preschool adventure with {clean_topic}! "
         f"Sing, dance, and learn rhythm, counting, and cheerful good habits in this vibrant 3D animated nursery rhyme for toddlers.\n\n"
-        f"⏱️ CHAPTERS & TIMESTAMPS:\n"
+        f" CHAPTERS & TIMESTAMPS:\n"
         f"{formatted_chapters_str}\n\n"
-        f"🎵 FULL SONG LYRICS:\n"
+        f" FULL SONG LYRICS:\n"
         f"{lyrics_full}\n\n"
-        f"🌟 ABOUT THIS VIDEO:\n"
+        f" ABOUT THIS VIDEO:\n"
         f"A delightful 3D preschool musical journey with {clean_topic} featuring vibrant dance routines, rhythmic call-and-response, and joyful early learning.\n\n"
-        f"🏷️ HASHTAGS:\n"
+        f" HASHTAGS:\n"
         f"{' '.join(hashtags)}"
     )
 
     pkg = {
-        "title": f"{clean_topic} ✨🎶 | 3D Nursery Rhymes & Preschool Songs",
+        "title": f"{clean_topic}  | 3D Nursery Rhymes & Preschool Songs",
         "description": full_description,
         "chapters": chapters,
         "hashtags": hashtags,
@@ -433,7 +433,7 @@ Return a valid JSON object with the following EXACT structure:
                 ("[Outro]", [
                     f"Thank you friends for singing along, sharing our delightful song!",
                     f"Wave goodbye with {topic_name} now, take a cheerful final bow!",
-                    f"Bye-bye friends, see you soon! Singing underneath the moon! ✨"
+                    f"Bye-bye friends, see you soon! Singing underneath the moon! "
                 ]),
             ]
             chapters_list = [
@@ -484,7 +484,7 @@ Return a valid JSON object with the following EXACT structure:
                 ]),
                 ("[Outro]", [
                     f"Thank you friends for singing along, sharing our delightful song!",
-                    f"Wave goodbye to {topic_name} now, take a cheerful friendly bow! ✨"
+                    f"Wave goodbye to {topic_name} now, take a cheerful friendly bow! "
                 ]),
             ]
             chapters_list = [
@@ -515,7 +515,7 @@ Return a valid JSON object with the following EXACT structure:
                     f"Learning with {topic_name} now, smiling as we take a bow!"
                 ]),
                 ("[Outro]", [
-                    f"Thank you friends for singing along, sharing our delightful song! ✨"
+                    f"Thank you friends for singing along, sharing our delightful song! "
                 ]),
             ]
             chapters_list = [
@@ -541,21 +541,21 @@ Return a valid JSON object with the following EXACT structure:
     tags = [clean_topic.lower(), f"{clean_topic.lower()} song", "nursery rhymes", "kids songs", "preschool animation", "3d cartoon", "toddler songs"]
 
     full_description = (
-        f"{clean_topic} ✨🎶 | 3D Nursery Rhymes & Kids Songs\n\n"
+        f"{clean_topic}  | 3D Nursery Rhymes & Kids Songs\n\n"
         f"Welcome to a fun and musical preschool adventure with {clean_topic}! "
         f"Sing, dance, and learn rhythm, counting, and cheerful good habits in this vibrant 3D animated nursery rhyme for toddlers.\n\n"
-        f"⏱️ CHAPTERS & TIMESTAMPS:\n"
+        f" CHAPTERS & TIMESTAMPS:\n"
         f"{formatted_chapters_str}\n\n"
-        f"🎵 FULL SONG LYRICS:\n"
+        f" FULL SONG LYRICS:\n"
         f"{lyrics_full}\n\n"
-        f"🌟 ABOUT THIS VIDEO:\n"
+        f" ABOUT THIS VIDEO:\n"
         f"Designed to spark preschool imagination, phonics awareness, and joyful physical movement through cheerful melodies and high-quality 3D animations.\n\n"
-        f"🏷️ HASHTAGS:\n"
+        f" HASHTAGS:\n"
         f"{' '.join(hashtags)}"
     )
 
     return {
-        "title": f"{clean_topic} ✨🎶 | 3D Nursery Rhymes & Preschool Songs",
+        "title": f"{clean_topic}  | 3D Nursery Rhymes & Preschool Songs",
         "description": full_description,
         "chapters": chapters,
         "hashtags": hashtags,

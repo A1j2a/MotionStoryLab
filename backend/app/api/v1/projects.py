@@ -57,6 +57,13 @@ async def create_project(
     )
     created = await project_repo.create(project)
 
+    # Permanently store topic in used_topics storage to prevent duplicates
+    from ai.topic_researcher import mark_topic_as_used
+    mark_topic_as_used(
+        title=payload.title,
+        topic=payload.topic,
+    )
+
     # 2. Automatically initialize initial DRAFT job
     await job_repo.create(
         Job(

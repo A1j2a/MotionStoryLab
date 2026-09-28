@@ -11,17 +11,23 @@ from app.schemas.job import JobRead, JobUpdate
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
 
+@router.get("", response_model=List[JobRead])
+@router.get("/", response_model=List[JobRead])
+async def list_jobs(
+    project_id: str | None = None,
+    session: AsyncSession = Depends(get_db_session),
+):
+    job_repo = JobRepository(session)
+    if project_id:
+        return await job_repo.list_by_project(project_id)
+    return await job_repo.list(limit=50)
+
+
 @router.get("/project/{project_id}", response_model=List[JobRead])
 async def list_jobs_for_project(
     project_id: str,
     session: AsyncSession = Depends(get_db_session),
 ):
-    project_repo = ProjectRepository(session)
-    if not await project_repo.get(project_id):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Project '{project_id}' not found",
-        )
     job_repo = JobRepository(session)
     return await job_repo.list_by_project(project_id)
 

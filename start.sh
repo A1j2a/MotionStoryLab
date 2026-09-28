@@ -133,13 +133,13 @@ BACKEND_PORT="${BACKEND_PORT:-8000}"
 BACKEND_HOST="${BACKEND_HOST:-127.0.0.1}"
 
 if lsof -Pi :${BACKEND_PORT} -sTCP:LISTEN -t >/dev/null 2>&1; then
-    echo "  ✓ Backend already running on port ${BACKEND_PORT}"
+    echo "  [OK] Backend already running on port ${BACKEND_PORT}"
 else
-    nohup "${PYTHON_BIN}" -m uvicorn app.main:app --app-dir "${SCRIPT_DIR}/backend" --host "${BACKEND_HOST}" --port "${BACKEND_PORT}" > "${SCRIPT_DIR}/logs/app.log" 2>&1 &
+    nohup "${PYTHON_BIN}" -m uvicorn app.main:app --app-dir "${SCRIPT_DIR}/backend" --reload --reload-dir "${SCRIPT_DIR}/backend" --reload-dir "${SCRIPT_DIR}/ai" --host "${BACKEND_HOST}" --port "${BACKEND_PORT}" > "${SCRIPT_DIR}/logs/app.log" 2>&1 &
     BACKEND_PID=$!
     disown ${BACKEND_PID} 2>/dev/null || true
     echo ${BACKEND_PID} > "${PID_DIR}/backend.pid"
-    echo "  ✓ Backend started (PID: ${BACKEND_PID})"
+    echo "  [OK] Backend started with hot-reload (PID: ${BACKEND_PID})"
 fi
 
 # 8. Start Frontend (Port 3000)
@@ -151,24 +151,18 @@ if [ -f "${SCRIPT_DIR}/frontend/package.json" ]; then
         (cd "${SCRIPT_DIR}/frontend" && npm install --silent)
     fi
 
-    if [ ! -d "${SCRIPT_DIR}/frontend/.next" ]; then
-        echo "  Building Next.js frontend..."
-        (cd "${SCRIPT_DIR}/frontend" && npm run build --silent)
-    fi
-
     if lsof -Pi :${FRONTEND_PORT} -sTCP:LISTEN -t >/dev/null 2>&1; then
         echo "  ✓ Frontend already running on port ${FRONTEND_PORT}"
     else
-        # npm run dev or npm start mode
         ORIG_DIR="$(pwd)"
         cd "${SCRIPT_DIR}/frontend"
-        nohup npx next start -H 127.0.0.1 -p "${FRONTEND_PORT}" > "${SCRIPT_DIR}/logs/frontend.log" 2>&1 &
+        nohup npx next dev --turbo -H 127.0.0.1 -p "${FRONTEND_PORT}" > "${SCRIPT_DIR}/logs/frontend.log" 2>&1 &
         FRONTEND_PID=$!
         disown ${FRONTEND_PID} 2>/dev/null || true
         echo ${FRONTEND_PID} > "${PID_DIR}/frontend.pid"
         cd "${ORIG_DIR}"
-        sleep 2
-        echo "  ✓ Frontend started (PID: ${FRONTEND_PID})"
+        sleep 3
+        echo "  ✓ Frontend started in dev mode with hot reload (PID: ${FRONTEND_PID})"
     fi
 fi
 
@@ -190,14 +184,14 @@ echo "=================================================="
 echo "[8/8] Verifying Backend Health..."
 sleep 2
 if curl -s -f "http://${BACKEND_HOST}:${BACKEND_PORT}/health" >/dev/null 2>&1; then
-    echo "✓ All services healthy and connected!"
+    echo "[OK] All services healthy and connected!"
 else
-    echo "! Backend is initializing in background. Please wait a moment."
+    echo "[!] Backend is initializing in background. Please wait a moment."
 fi
 
 echo ""
-echo "🚀 Studio is running actively in the background!"
-echo "   • Open in browser : http://127.0.0.1:${FRONTEND_PORT}"
-echo "   • Workflow Map    : http://127.0.0.1:${FRONTEND_PORT}/workflow"
-echo "   • Stop all servers: ./stop.sh"
+echo "Studio is running actively in the background!"
+echo "   - Open in browser : http://127.0.0.1:${FRONTEND_PORT}"
+echo "   - Workflow Map    : http://127.0.0.1:${FRONTEND_PORT}/workflow"
+echo "   - Stop all servers: ./stop.sh"
 echo "=================================================="

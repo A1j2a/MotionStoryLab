@@ -187,6 +187,11 @@ class NewAIImageProvider(ImageGenerationProvider):
             image_size = "square_hd"
 
         url = f"https://fal.run/{self.model}"
+        try:
+            from ai.providers import _record_ai_call
+            _record_ai_call("Fal.ai (Image)", self.model)
+        except Exception:
+            pass
         headers = {
             "Authorization": f"Key {self.api_key}",
             "Content-Type": "application/json",

@@ -260,10 +260,10 @@ async def regenerate_lyrics_only(
     # Re-embed lyrics into description if present
     if "description" in curr_pkg and curr_pkg["description"]:
         desc = curr_pkg["description"]
-        if "🎵 FULL SONG LYRICS:" in desc:
-            parts = desc.split("🎵 FULL SONG LYRICS:")
-            after_parts = parts[1].split("\n\n🌟 ABOUT THIS VIDEO:")
-            curr_pkg["description"] = f"{parts[0]}🎵 FULL SONG LYRICS:\n{lyrics_data['lyrics_full']}\n\n🌟 ABOUT THIS VIDEO:{after_parts[1] if len(after_parts) > 1 else ''}"
+        if " FULL SONG LYRICS:" in desc:
+            parts = desc.split(" FULL SONG LYRICS:")
+            after_parts = parts[1].split("\n\n ABOUT THIS VIDEO:")
+            curr_pkg["description"] = f"{parts[0]} FULL SONG LYRICS:\n{lyrics_data['lyrics_full']}\n\n ABOUT THIS VIDEO:{after_parts[1] if len(after_parts) > 1 else ''}"
 
     project.lyrics_text = lyrics_data["lyrics_full"]
     meta["content_package"] = curr_pkg

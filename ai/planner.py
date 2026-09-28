@@ -229,17 +229,17 @@ def generate_seo_metadata(
         }
 
     titles = [
-        f"{clean_topic} 🎵 Nursery Rhymes & Kids Songs | Preschool Learning",
-        f"The {clean_topic} Song! ✨ Fun 3D Toddler Cartoons & Rhymes",
-        f"Sing Along: {clean_topic} 🎈 Super Simple Songs for Children",
+        f"{clean_topic}  Nursery Rhymes & Kids Songs | Preschool Learning",
+        f"The {clean_topic} Song!  Fun 3D Toddler Cartoons & Rhymes",
+        f"Sing Along: {clean_topic}  Super Simple Songs for Children",
     ]
 
-    description_body = f"""Welcome to our magical world of music and fun! Today we are singing about {clean_topic}! 🌟
+    description_body = f"""Welcome to our magical world of music and fun! Today we are singing about {clean_topic}! 
 Sing, dance, and learn with cute 3D cartoon characters in Pixar-grade animation.
 
-🔔 Subscribe for weekly educational rhymes, preschool phonics, and dance-along toddler cartoons!
+ Subscribe for weekly educational rhymes, preschool phonics, and dance-along toddler cartoons!
 
-🎵 LYRICS:
+ LYRICS:
 """
     if verses:
         for v in verses:
@@ -248,7 +248,7 @@ Sing, dance, and learn with cute 3D cartoon characters in Pixar-grade animation.
                 description_body += f"{line}\n"
 
     description_body += """
-⏱️ VIDEO CHAPTERS:
+ VIDEO CHAPTERS:
 00:00 - Welcome & Introduction
 00:15 - Singing & Dancing Verse
 00:30 - Happy Chorus & Beat

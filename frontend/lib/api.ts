@@ -199,6 +199,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+  getAiUsageStats: () =>
+    request<Array<{ provider: string; model: string; call_count: number; last_used: string }>>("/api/v1/settings/ai-usage").catch(() =>
+      request<Array<{ provider: string; model: string; call_count: number; last_used: string }>>("/api/v1/topics/ai-usage").catch(() => [])
+    ),
 
   // Step 2 & 4: Content Package & Approved Lyrics
   getContentPackage: (projectId: string) =>

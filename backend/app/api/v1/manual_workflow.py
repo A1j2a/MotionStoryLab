@@ -63,7 +63,7 @@ async def generate_project_seo(
 
     prompt = f"""Generate a high-converting YouTube Kids SEO metadata package for the preschool topic: "{topic}".
 Return ONLY a valid JSON object with these EXACT keys:
-- "title": Catchy, high-CTR YouTube title with friendly emojis (must have million-view potential, e.g. "{topic} 🎶 Soothing 3D Nursery Rhyme")
+- "title": Catchy, high-CTR YouTube title with friendly emojis (must have million-view potential, e.g. "{topic}  Soothing 3D Nursery Rhyme")
 - "description": Comprehensive, warm preschool YouTube description with overview, educational value, lyrics section placeholder, and subscribe CTA
 - "tags": Comma-separated string of 15 high-intent preschool search keywords (e.g. "{topic.lower()}, kids songs, nursery rhymes, 3d animation, toddlers")
 - "caption": Short, engaging social media / YouTube Shorts caption with 2-3 emojis and trending hashtags
@@ -79,16 +79,16 @@ Return ONLY a valid JSON object with these EXACT keys:
     if not res or not isinstance(res, dict) or not res.get("title"):
         clean = topic.strip().title()
         res = {
-            "title": f"{clean} 🎶 Nursery Rhymes & Kids Songs | 3D Animation for Toddlers ✨",
-            "description": f"Welcome to our magical world of preschool music and joyful discovery! 🌟\n\nSing, dance, and learn with cute 3D cartoon friends in this animated nursery rhyme about {clean}.\n\n🔔 Subscribe for weekly educational rhymes, phonics, and dance-along toddler cartoons!\n\n#nurseryrhymes #kidssongs #toddlerlearning #3danimation",
+            "title": f"{clean}  Nursery Rhymes & Kids Songs | 3D Animation for Toddlers ",
+            "description": f"Welcome to our magical world of preschool music and joyful discovery! \n\nSing, dance, and learn with cute 3D cartoon friends in this animated nursery rhyme about {clean}.\n\n Subscribe for weekly educational rhymes, phonics, and dance-along toddler cartoons!\n\n#nurseryrhymes #kidssongs #toddlerlearning #3danimation",
             "tags": f"{clean.lower()}, kids songs, nursery rhymes, toddler songs, preschool learning, 3d cartoon, rhymes for babies, baby learning, educational songs, sing along, cartoon for kids, bedtime lullaby, animation",
-            "caption": f"Sing and dance along with {clean}! 🌟🎵 Learn, smile, and explore with our cute 3D cartoon friends! #kidssongs #nurseryrhymes #preschool #toddlerfun",
+            "caption": f"Sing and dance along with {clean}!  Learn, smile, and explore with our cute 3D cartoon friends! #kidssongs #nurseryrhymes #preschool #toddlerfun",
         }
     else:
         # Normalize fields in case LLM outputs lists or alternative keys
         clean = topic.strip().title()
         if not res.get("title"):
-            res["title"] = f"{clean} 🎶 Nursery Rhymes & Kids Songs | 3D Animation for Toddlers ✨"
+            res["title"] = f"{clean}  Nursery Rhymes & Kids Songs | 3D Animation for Toddlers "
         
         tags_raw = res.get("tags") or res.get("keywords") or res.get("search_tags") or res.get("hashtags")
         if isinstance(tags_raw, list):
@@ -99,9 +99,9 @@ Return ONLY a valid JSON object with these EXACT keys:
             res["tags"] = f"{clean.lower()}, kids songs, nursery rhymes, toddler songs, preschool learning, 3d cartoon"
 
         if not res.get("description"):
-            res["description"] = f"Join our 3D animated preschool adventure with {clean}! Sing along, dance, and learn with colorful cartoon friends.\n\n🔔 Subscribe for more rhymes!"
+            res["description"] = f"Join our 3D animated preschool adventure with {clean}! Sing along, dance, and learn with colorful cartoon friends.\n\n Subscribe for more rhymes!"
         if not res.get("caption"):
-            res["caption"] = f"Sing and learn with {clean}! 🌟 #nurseryrhymes #kidssongs #preschool"
+            res["caption"] = f"Sing and learn with {clean}!  #nurseryrhymes #kidssongs #preschool"
 
     # Automatically generate High-CTR Thumbnail matching selected topic & SEO title
     project_dir = Path(str(settings.resolved_project_dir)) / project_id
@@ -331,10 +331,10 @@ async def get_project_seo(
     if not seo:
         clean = (project.topic or project.title or "Nursery Rhymes").strip().title()
         seo = {
-            "title": f"{clean} 🎶 Nursery Rhymes & Kids Songs | 3D Animation for Toddlers ✨",
-            "description": f"Welcome to our magical world of preschool music and joyful discovery! 🌟\n\nSing, dance, and learn with cute 3D cartoon friends in this animated nursery rhyme about {clean}.\n\n🔔 Subscribe for weekly educational rhymes, phonics, and dance-along toddler cartoons!\n\n#nurseryrhymes #kidssongs #toddlerlearning #3danimation",
+            "title": f"{clean}  Nursery Rhymes & Kids Songs | 3D Animation for Toddlers ",
+            "description": f"Welcome to our magical world of preschool music and joyful discovery! \n\nSing, dance, and learn with cute 3D cartoon friends in this animated nursery rhyme about {clean}.\n\n Subscribe for weekly educational rhymes, phonics, and dance-along toddler cartoons!\n\n#nurseryrhymes #kidssongs #toddlerlearning #3danimation",
             "tags": f"{clean.lower()}, kids songs, nursery rhymes, toddler songs, preschool learning, 3d cartoon, rhymes for babies, baby learning, educational songs, sing along, cartoon for kids, bedtime lullaby, animation",
-            "caption": f"Sing and dance along with {clean}! 🌟🎵 Learn, smile, and explore with our cute 3D cartoon friends! #kidssongs #nurseryrhymes #preschool #toddlerfun",
+            "caption": f"Sing and dance along with {clean}!  Learn, smile, and explore with our cute 3D cartoon friends! #kidssongs #nurseryrhymes #preschool #toddlerfun",
             "thumbnail_url": f"/api/v1/projects/{project_id}/thumbnail",
         }
     return seo

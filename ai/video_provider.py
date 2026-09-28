@@ -467,8 +467,11 @@ class WanVideoProvider(VideoGenerationProvider):
             "fps": self.fps,
         }
 
-        if end_image_url:
-            arguments["end_image_url"] = end_image_url
+        try:
+            from ai.providers import _record_ai_call
+            _record_ai_call("Fal.ai (Video)", self.model)
+        except Exception:
+            pass
 
         # Attempt call via fal_client
         try:
