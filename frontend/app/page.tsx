@@ -9,6 +9,7 @@ import { StoryboardView } from "@/components/StoryboardView";
 import { QCCheckView } from "@/components/QCCheckView";
 import { ManualWorkflowView } from "@/components/ManualWorkflowView";
 import ConfirmModal from "@/components/ConfirmModal";
+import YouTubeStudioModal from "@/components/YouTubeStudioModal";
 import { api } from "@/lib/api";
 import {
  Project,
@@ -83,6 +84,7 @@ export default function DashboardPage() {
  const [uploadLoading, setUploadLoading] = useState(false);
  const [uploadSuccess, setUploadSuccess] = useState<string | null>(null);
  const [showResetConfirm, setShowResetConfirm] = useState(false);
+ const [showYouTubeModal, setShowYouTubeModal] = useState(false);
 
  // Audio player state
  const [isPlayingAudio, setIsPlayingAudio] = useState(false);
@@ -392,19 +394,10 @@ export default function DashboardPage() {
  }
  };
 
- // Step 10: Private YouTube Upload
- const handleYouTubeUpload = async () => {
+ // Step 10: Open YouTube Studio Staging & Launchpad
+ const handleYouTubeUpload = () => {
  if (!activeProject) return;
- setUploadLoading(true);
- setUploadSuccess(null);
- try {
- const res = await api.uploadYouTube(activeProject.id, "private");
- setUploadSuccess(res.message || "Video uploaded strictly in PRIVATE mode.");
- } catch (err: any) {
- alert("YouTube upload failed: " + err.message);
- } finally {
- setUploadLoading(false);
- }
+ setShowYouTubeModal(true);
  };
 
  const toggleAudioPlayback = () => {
@@ -429,6 +422,20 @@ export default function DashboardPage() {
  onConfirm={doResetActiveProject}
  onCancel={() => setShowResetConfirm(false)}
  />
+ {activeProject && (
+ <YouTubeStudioModal
+ isOpen={showYouTubeModal}
+ onClose={() => setShowYouTubeModal(false)}
+ projectId={activeProject.id}
+ projectTopic={activeProject.topic}
+ defaultTitle={contentPkg?.title || activeProject.title}
+ defaultDescription={contentPkg?.description || ""}
+ defaultTags={contentPkg?.tags || []}
+ defaultHashtags={contentPkg?.hashtags || []}
+ thumbnailUrl={`http://127.0.0.1:8000/api/v1/projects/${activeProject.id}/thumbnail`}
+ videoUrl={`http://127.0.0.1:8000/api/v1/projects/${activeProject.id}/video`}
+ />
+ )}
  <Header
  title="AI Kids Video Production Studio"
  subtitle="10-Step Automated 3D Kids & Nursery Rhyme Production Workflow"
@@ -473,6 +480,18 @@ export default function DashboardPage() {
  <Power className="w-3.5 h-3.5" />
  <span>{workflowActive ? "Process: ON" : "Process: OFF"}</span>
  </button>
+
+ {/* YouTube Staging Quick Launch Button */}
+ {activeProject && (
+ <button
+ onClick={() => setShowYouTubeModal(true)}
+ className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-[#FEF2F2] text-[#DC2626] hover:bg-[#FEE2E2] border border-[#FECACA] transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs"
+ title="Preview & Launch YouTube Studio with all parameters pre-filled"
+ >
+ <UploadCloud className="w-3.5 h-3.5" />
+ <span>YouTube Staging</span>
+ </button>
+ )}
 
  {/* Clear / Start Fresh Button */}
  {activeProject && (

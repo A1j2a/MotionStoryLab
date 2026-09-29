@@ -2,7 +2,10 @@ import os
 import math
 import shutil
 import subprocess
+import logging
 from typing import List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 def get_ffmpeg_path() -> str:
@@ -428,7 +431,7 @@ Rules:
 - Welcoming dynamic toddler pose, vibrant thematic props, warm golden sunny rim lighting with volumetric sunbeams.
 - Must end with: 'strictly NO text, NO words, NO letters, NO watermark, NO logo.'
 - Return ONLY the final prompt text string, with no introduction, quotes, or markdown."""
-        ai_res = provider.generate(ai_req, "You are a master 3D Pixar thumbnail prompt creator. Return only the prompt string.")
+        ai_res = provider.generate_text(ai_req, "You are a master 3D Pixar thumbnail prompt creator. Return only the prompt string.")
         if ai_res and len(ai_res.strip()) > 50:
             clean_prompt = ai_res.strip().replace('"', '').replace('\n', ' ')
             if "no text" not in clean_prompt.lower():

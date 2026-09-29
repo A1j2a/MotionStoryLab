@@ -135,7 +135,7 @@ BACKEND_HOST="${BACKEND_HOST:-127.0.0.1}"
 if lsof -Pi :${BACKEND_PORT} -sTCP:LISTEN -t >/dev/null 2>&1; then
     echo "  [OK] Backend already running on port ${BACKEND_PORT}"
 else
-    nohup "${PYTHON_BIN}" -m uvicorn app.main:app --app-dir "${SCRIPT_DIR}/backend" --reload --reload-dir "${SCRIPT_DIR}/backend" --reload-dir "${SCRIPT_DIR}/ai" --host "${BACKEND_HOST}" --port "${BACKEND_PORT}" > "${SCRIPT_DIR}/logs/app.log" 2>&1 &
+    nohup "${PYTHON_BIN}" -m uvicorn app.main:app --app-dir "${SCRIPT_DIR}/backend" --reload --reload-dir "${SCRIPT_DIR}/backend" --reload-dir "${SCRIPT_DIR}/ai" --reload-dir "${SCRIPT_DIR}/renderer" --host "${BACKEND_HOST}" --port "${BACKEND_PORT}" </dev/null > "${SCRIPT_DIR}/logs/app.log" 2>&1 &
     BACKEND_PID=$!
     disown ${BACKEND_PID} 2>/dev/null || true
     echo ${BACKEND_PID} > "${PID_DIR}/backend.pid"

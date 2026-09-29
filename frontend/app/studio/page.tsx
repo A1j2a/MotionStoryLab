@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import { Header } from "@/components/Header";
+import YouTubeStudioModal from "@/components/YouTubeStudioModal";
 import { api } from "@/lib/api";
 import { Project, Scene } from "@/lib/types";
 import {
@@ -168,6 +169,7 @@ export default function StudioPage() {
  const [assembling, setAssembling] = useState(false);
  const [finalVideoResult, setFinalVideoResult] = useState<{ status: string; final_video: string; duration: number } | null>(null);
  const [assembleError, setAssembleError] = useState<string | null>(null);
+ const [showYouTubeModal, setShowYouTubeModal] = useState(false);
 
  useEffect(() => {
  api.getProjects().then((list) => {
@@ -671,10 +673,18 @@ export default function StudioPage() {
  <CheckCircle2 className="w-12 h-12 text-green-500 mx-auto" />
  <h3 className="text-lg font-bold text-green-800">Final Video Ready </h3>
  {finalVideoResult.duration && <p className="text-3xl font-bold text-green-700">{finalVideoResult.duration.toFixed(1)}s</p>}
+ <div className="flex flex-wrap items-center justify-center gap-3">
  <a href={api.getFinalVideoUrl(selectedProjectId)} target="_blank" rel="noopener noreferrer" download
  className="inline-flex items-center gap-2 px-6 py-3 bg-green-600 text-white rounded-xl font-semibold hover:bg-green-700 transition-colors">
  <Play className="w-4 h-4" /> Download / Open Final Video
  </a>
+ <button
+ onClick={() => setShowYouTubeModal(true)}
+ className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-red-600 to-rose-600 text-white rounded-xl font-semibold hover:opacity-95 transition-all shadow-md shadow-red-500/20 cursor-pointer"
+ >
+ <UploadCloud className="w-4 h-4" /> YouTube Studio Staging & Upload
+ </button>
+ </div>
  </div>
  )}
  </div>
@@ -682,6 +692,21 @@ export default function StudioPage() {
  </>
  )}
  </main>
+
+ {selectedProjectId && (
+ <YouTubeStudioModal
+ isOpen={showYouTubeModal}
+ onClose={() => setShowYouTubeModal(false)}
+ projectId={selectedProjectId}
+ projectTopic={projects.find(p => p.id === selectedProjectId)?.topic || ""}
+ defaultTitle={projects.find(p => p.id === selectedProjectId)?.title || ""}
+ defaultDescription={""}
+ defaultTags={[]}
+ defaultHashtags={[]}
+ thumbnailUrl={`http://127.0.0.1:8000/api/v1/projects/${selectedProjectId}/thumbnail`}
+ videoUrl={`http://127.0.0.1:8000/api/v1/projects/${selectedProjectId}/video`}
+ />
+ )}
 
  {/* Assignment Modal */}
  {assigningFile && (

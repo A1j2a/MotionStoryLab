@@ -36,6 +36,7 @@ import {
  Activity,
 } from "lucide-react";
 import { InteractiveEngineFlow } from "@/components/InteractiveEngineFlow";
+import YouTubeStudioModal from "@/components/YouTubeStudioModal";
 
 interface ManualWorkflowViewProps {
  initialProjectId?: string;
@@ -93,6 +94,7 @@ interface AssemblyReadiness {
 export function ManualWorkflowView({ initialProjectId, onProjectChange }: ManualWorkflowViewProps) {
  const [projects, setProjects] = useState<Project[]>([]);
  const [selectedProjectId, setSelectedProjectId] = useState<string>(initialProjectId || "");
+ const [showYouTubeModal, setShowYouTubeModal] = useState(false);
  const [activeProject, setActiveProject] = useState<Project | null>(null);
 
  // Step 1: Topic Selection & AI Ideas
@@ -1920,6 +1922,13 @@ export function ManualWorkflowView({ initialProjectId, onProjectChange }: Manual
  <Download className="w-3.5 h-3.5" />
  <span>Download MP4</span>
  </a>
+ <button
+ onClick={() => setShowYouTubeModal(true)}
+ className="flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-red-600 to-rose-600 hover:opacity-95 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-red-500/20 cursor-pointer"
+ >
+ <UploadCloud className="w-3.5 h-3.5" />
+ <span>YouTube Studio Upload</span>
+ </button>
  </div>
  </div>
 
@@ -2002,6 +2011,21 @@ export function ManualWorkflowView({ initialProjectId, onProjectChange }: Manual
  </div>
  )}
  </section>
+
+ {selectedProjectId && (
+ <YouTubeStudioModal
+ isOpen={showYouTubeModal}
+ onClose={() => setShowYouTubeModal(false)}
+ projectId={selectedProjectId}
+ projectTopic={activeProject?.topic || topicInput}
+ defaultTitle={seoPkg?.title || activeProject?.title || ""}
+ defaultDescription={seoPkg?.description || ""}
+ defaultTags={seoPkg?.tags ? seoPkg.tags.split(",").map((t: string) => t.trim()) : []}
+ defaultHashtags={seoPkg?.caption ? seoPkg.caption.split(" ").filter((w: string) => w.startsWith("#")) : []}
+ thumbnailUrl={`${API_BASE}/api/v1/projects/${selectedProjectId}/thumbnail?t=${thumbTimestamp}`}
+ videoUrl={`${API_BASE}/api/v1/projects/${selectedProjectId}/assembly/final-video`}
+ />
+ )}
  </div>
  );
 }

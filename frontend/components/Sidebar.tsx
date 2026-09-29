@@ -5,32 +5,21 @@ import { usePathname } from "next/navigation";
 import {
  LayoutDashboard,
  Film,
- PlusCircle,
- Clapperboard,
- Users2,
- FolderArchive,
  Music,
  Cpu,
- CheckCircle,
  Settings,
  Terminal,
  Sparkles,
  Layers,
- UploadCloud,
 } from "lucide-react";
 import { HealthStatus } from "./HealthStatus";
 
 const NAV_ITEMS = [
- { href: "/", label: "Studio Dashboard (10-Step)", icon: LayoutDashboard, highlight: true },
- { href: "/studio", label: " Manual Workflow Studio", icon: UploadCloud, highlight: false },
+ { href: "/", label: "Studio Dashboard", icon: LayoutDashboard, highlight: true },
  { href: "/projects", label: "Projects", icon: Film },
  { href: "/workflow", label: "Engine Workflow", icon: Layers },
- { href: "/scenes", label: "Scene Editor", icon: Clapperboard },
- { href: "/characters", label: "Character Bible", icon: Users2 },
- { href: "/assets", label: "Asset Library", icon: FolderArchive },
  { href: "/audio", label: "Audio Studio", icon: Music },
  { href: "/render", label: "Render Pipeline", icon: Cpu },
- { href: "/approval", label: "Video Approval & SEO", icon: CheckCircle },
  { href: "/settings", label: "Settings", icon: Settings },
  { href: "/logs", label: "Live Logs", icon: Terminal },
 ];
