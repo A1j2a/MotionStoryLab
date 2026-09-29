@@ -97,6 +97,11 @@ async def select_topic_and_create_project(
     project_repo = ProjectRepository(session)
     job_repo = JobRepository(session)
 
+    # If project already exists for this topic or title, reuse and restore it
+    existing = await project_repo.get_by_topic_or_title(payload.topic, payload.title)
+    if existing:
+        return existing
+
     d_min = payload.duration_min or 2
     d_max = payload.duration_max or 3
     if payload.duration:

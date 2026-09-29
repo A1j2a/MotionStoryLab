@@ -1,5 +1,5 @@
 from typing import Optional, List
-from sqlalchemy import select
+from sqlalchemy import select, func, or_
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.project import Project
@@ -23,6 +23,34 @@ class ProjectRepository(SQLAlchemyRepository[Project]):
         )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
+
+    async def get_by_topic_or_title(self, topic: str, title: Optional[str] = None) -> Optional[Project]:
+        clean_topic = (topic or "").strip().lower()
+        clean_title = (title or "").strip().lower()
+        if not clean_topic and not clean_title:
+            return None
+
+        conditions = []
+        if clean_topic:
+            conditions.append(func.lower(Project.topic) == clean_topic)
+            conditions.append(func.lower(Project.title) == clean_topic)
+        if clean_title:
+            conditions.append(func.lower(Project.title) == clean_title)
+            conditions.append(func.lower(Project.topic) == clean_title)
+
+        stmt = (
+            select(Project)
+            .where(or_(*conditions))
+            .options(
+                selectinload(Project.jobs),
+                selectinload(Project.characters),
+                selectinload(Project.scenes),
+                selectinload(Project.assets),
+            )
+            .order_by(Project.created_at.desc())
+        )
+        result = await self.session.execute(stmt)
+        return result.scalars().first()
 
     async def list_by_status(
         self,

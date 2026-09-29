@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { TopicOpportunity } from "@/lib/types";
+import { TopicOpportunity, Project } from "@/lib/types";
 import { api } from "@/lib/api";
 import Link from "next/link";
 import {
@@ -19,18 +19,56 @@ import {
  Globe2,
  Baby,
  Hash,
+ Layers,
+ CheckCircle2,
+ RotateCcw,
+ ArrowDown,
 } from "lucide-react";
 
 interface TopicDiscoveryProps {
- onSelectTopic: (topic: TopicOpportunity) => void;
+  onSelectTopic: (topic: TopicOpportunity) => void;
+  activeTopic?: string;
+  activeProjectId?: string;
+  activeProject?: Project | null;
+  existingProjects?: Project[];
+  onSelectExistingProject?: (project: Project) => void;
 }
 
-export function TopicDiscovery({ onSelectTopic }: TopicDiscoveryProps) {
- const [loading, setLoading] = useState(false);
- const [topics, setTopics] = useState<TopicOpportunity[]>([]);
- const [selectedTopic, setSelectedTopic] = useState<TopicOpportunity | null>(null);
- const [activeModel, setActiveModel] = useState<string>("");
- const [errorMessage, setErrorMessage] = useState<string | null>(null);
+function normalizeTopicString(str?: string): string {
+  if (!str) return "";
+  return str
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function doesTopicMatchProject(t: TopicOpportunity, p?: Project | null): boolean {
+  if (!p) return false;
+  const tTopic = normalizeTopicString(t.topic);
+  const tTitle = normalizeTopicString(t.suggested_title);
+  const pTopic = normalizeTopicString(p.topic);
+  const pTitle = normalizeTopicString(p.title);
+
+  if (tTopic && pTopic && tTopic === pTopic) return true;
+  if (tTitle && pTitle && tTitle === pTitle) return true;
+  if (tTopic && pTitle && (pTitle.includes(tTopic) || tTopic.includes(pTopic))) return true;
+  if (pTopic && tTitle && (tTitle.includes(pTopic) || pTopic.includes(tTitle))) return true;
+  return false;
+}
+
+export function TopicDiscovery({
+  onSelectTopic,
+  activeTopic,
+  activeProjectId,
+  activeProject,
+  existingProjects,
+  onSelectExistingProject,
+}: TopicDiscoveryProps) {
+  const [loading, setLoading] = useState(false);
+  const [topics, setTopics] = useState<TopicOpportunity[]>([]);
+  const [activeModel, setActiveModel] = useState<string>("");
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
  // Filters requested by user: age select, duration, language, limit
  const [targetAge, setTargetAge] = useState<string>("2–5 Years");
@@ -287,24 +325,142 @@ export function TopicDiscovery({ onSelectTopic }: TopicDiscoveryProps) {
  </div>
  )}
 
- {topics.length > 0 && (
+ {existingProjects && existingProjects.length > 0 && (
+ <div className="bg-white border border-[#E5E5EA] rounded-2xl p-4 shadow-xs space-y-3">
+ <div className="flex items-center justify-between">
+ <span className="text-xs font-bold text-[#1D1D1F] flex items-center gap-1.5">
+ <Layers className="w-3.5 h-3.5 text-[#FF6B00]" />
+ <span>Ongoing Studio Productions ({existingProjects.length})</span>
+ </span>
+ <span className="text-[11px] text-[#86868B]">Click any ongoing project to instantly restore its flow</span>
+ </div>
+ <div className="flex items-center gap-2 overflow-x-auto pb-1 select-none">
+ {existingProjects.map((p) => {
+ const isActive = activeProjectId ? p.id === activeProjectId : activeProject?.id === p.id;
+ return (
+ <button
+ key={p.id}
+ onClick={() => {
+ if (onSelectExistingProject) {
+ onSelectExistingProject(p);
+ } else {
+ onSelectTopic({
+ topic: p.topic,
+ suggested_title: p.title,
+ category: p.video_type || "Nursery Rhyme",
+ target_age: p.target_age || "2-5 Years",
+ duration: `${p.duration_min}-${p.duration_max} Minutes`,
+ search_keywords: [],
+ content_angle: p.topic,
+ why_worth_considering: "Ongoing project in studio",
+ opportunity_signals: "Previously created",
+ suggested_characters: [],
+ suggested_story_concept: p.title || p.topic,
+ });
+ }
+ }}
+ className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer border ${
+ isActive
+ ? "bg-emerald-50 border-emerald-500 text-emerald-800 font-bold shadow-xs ring-2 ring-emerald-500/20"
+ : "bg-[#FAFAFC] hover:bg-[#F5F5F7] text-[#1D1D1F] border-[#E5E5EA]"
+ }`}
+ >
+ <span className={`w-2 h-2 rounded-full ${isActive ? "bg-emerald-500 animate-pulse" : "bg-slate-300"}`} />
+ <span className="max-w-[180px] truncate">{p.title || p.topic}</span>
+ <span className="text-[10px] px-1.5 py-0.5 rounded bg-white border border-[#E5E5EA] text-[#6E6E73] font-mono">
+ {isActive ? "Active Now" : p.status}
+ </span>
+ </button>
+ );
+ })}
+ </div>
+
+ {/* Highlight Active Flow Banner */}
+ {activeProject && (
+ <div className="bg-gradient-to-r from-emerald-50/90 to-teal-50/70 border border-emerald-300 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shadow-2xs">
+ <div className="flex items-center gap-2.5 min-w-0">
+ <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+ <div className="min-w-0">
+ <div className="flex items-center gap-2">
+ <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-900 bg-emerald-100 border border-emerald-200 px-2 py-0.5 rounded">
+ Active Studio Production Flow
+ </span>
+ <span className="text-[11px] font-mono text-emerald-800 font-bold">
+ {activeProject.status}
+ </span>
+ </div>
+ <p className="text-xs font-bold text-[#1D1D1F] truncate mt-0.5">
+ {activeProject.title || activeProject.topic}
+ </p>
+ </div>
+ </div>
+ <button
+ onClick={() => {
+ const el = document.getElementById("step-2-section");
+ if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+ }}
+ className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg transition-all flex items-center gap-1.5 shrink-0 cursor-pointer shadow-xs"
+ >
+ <span>Scroll to Flow (Steps 2–10)</span>
+ <ArrowRight className="w-3.5 h-3.5" />
+ </button>
+ </div>
+ )}
+ </div>
+ )}
+
+ {topics.length > 0 && (() => {
+ const activeTopicCardIndex = topics.findIndex((t) => {
+ if (activeProjectId || activeProject) {
+ const targetId = activeProjectId || activeProject?.id;
+ const matched = existingProjects?.find((p) => doesTopicMatchProject(t, p));
+ if (matched && matched.id === targetId) return true;
+ if (activeProject && doesTopicMatchProject(t, activeProject) && activeProject.id === targetId) return true;
+ return false;
+ }
+ if (activeTopic) {
+ const normActive = normalizeTopicString(activeTopic);
+ const tTop = normalizeTopicString(t.topic);
+ const tTit = normalizeTopicString(t.suggested_title);
+ return (tTop && (normActive === tTop || normActive.includes(tTop) || tTop.includes(normActive))) ||
+ (tTit && (normActive === tTit || normActive.includes(tTit) || tTit.includes(normActive)));
+ }
+ return false;
+ });
+
+ return (
  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
  {topics.map((t, idx) => {
- const isSelected = selectedTopic?.topic === t.topic;
+ const isSelected = (idx === activeTopicCardIndex);
+ const existingProj = existingProjects?.find((p) => doesTopicMatchProject(t, p));
+
  return (
  <div
  key={idx}
  className={`bg-white border rounded-2xl p-4.5 shadow-xs flex flex-col justify-between space-y-3.5 transition-all hover:shadow-md ${
  isSelected
- ? "border-[#FF6B00] ring-2 ring-orange-500/20"
+ ? "border-emerald-500 ring-2 ring-emerald-500/25 bg-emerald-50/10 shadow-sm shadow-emerald-500/5"
+ : existingProj
+ ? "border-blue-200 hover:border-blue-300"
  : "border-[#E5E5EA] hover:border-orange-300"
  }`}
  >
  <div className="space-y-2.5">
  <div className="flex items-center justify-between gap-2">
- <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-orange-50 text-[#C2410C] border border-orange-100 truncate">
+ {isSelected ? (
+ <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1.5 shadow-2xs">
+ <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+ Active Production
+ </span>
+ ) : existingProj ? (
+ <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
+ Saved • {existingProj.status}
+ </span>
+ ) : (
+ <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-orange-50 text-[#C2410C] border border-orange-100 truncate">
  {t.category}
  </span>
+ )}
  <span className="text-[10px] font-semibold text-[#86868B] shrink-0">
  Age: {t.target_age}
  </span>
@@ -354,25 +510,64 @@ export function TopicDiscovery({ onSelectTopic }: TopicDiscoveryProps) {
  )}
  </div>
 
+ {isSelected ? (
  <button
  onClick={() => {
- setSelectedTopic(t);
+ const el = document.getElementById("step-2-section");
+ if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+ }}
+ className="w-full text-xs font-bold py-2.5 px-3.5 rounded-xl transition-all flex items-center justify-between cursor-pointer bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white shadow-sm shadow-emerald-600/20 group border border-emerald-500/80"
+ >
+ <div className="flex items-center gap-2">
+ <span className="flex h-2 w-2 relative">
+ <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-200 opacity-75" />
+ <span className="relative inline-flex rounded-full h-2 w-2 bg-white" />
+ </span>
+ <span className="tracking-wide">Active Production</span>
+ </div>
+ <div className="flex items-center gap-1 text-[11px] font-semibold text-emerald-100 group-hover:text-white transition-colors bg-white/15 px-2 py-0.5 rounded-md">
+ <span>View Flow</span>
+ <ArrowDown className="w-3.5 h-3.5 group-hover:translate-y-0.5 transition-transform" />
+ </div>
+ </button>
+ ) : existingProj ? (
+ <button
+ onClick={() => {
+ if (onSelectExistingProject) {
+ onSelectExistingProject(existingProj);
+ } else {
+ onSelectTopic(t);
+ }
+ }}
+ className="w-full text-xs font-bold py-2.5 px-3.5 rounded-xl border transition-all flex items-center justify-between cursor-pointer bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200 shadow-2xs group"
+ >
+ <div className="flex items-center gap-1.5">
+ <RotateCcw className="w-3.5 h-3.5 text-blue-600 group-hover:-rotate-45 transition-transform" />
+ <span>Switch & Restore Flow</span>
+ </div>
+ <span className="text-[10px] font-mono text-blue-600/80 bg-blue-100/60 px-1.5 py-0.5 rounded">
+ {existingProj.status}
+ </span>
+ </button>
+ ) : (
+ <button
+ onClick={() => {
  onSelectTopic(t);
  }}
- className={`w-full text-xs font-bold py-2.5 rounded-xl border transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
- isSelected
- ? "bg-[#FF6B00] text-white border-[#FF6B00] shadow-sm"
- : "bg-[#FAFAFC] text-[#1D1D1F] border-[#E5E5EA] hover:bg-orange-50 hover:text-[#FF6B00] hover:border-orange-200"
- }`}
+ className="w-full text-xs font-bold py-2.5 px-3.5 rounded-xl border transition-all flex items-center justify-between cursor-pointer bg-[#FAFAFC] text-[#1D1D1F] border-[#E5E5EA] hover:bg-orange-50 hover:text-[#FF6B00] hover:border-orange-200 group"
  >
- <span>Select Topic</span>
- <ArrowRight className="w-3.5 h-3.5" />
+ <span>Select Topic & Start Flow</span>
+ <ArrowRight className="w-3.5 h-3.5 text-[#86868B] group-hover:text-[#FF6B00] group-hover:translate-x-0.5 transition-all" />
  </button>
+ )}
  </div>
  );
  })}
  </div>
- )}
+ );
+ })()}
  </div>
  );
 }
+
+export default TopicDiscovery;

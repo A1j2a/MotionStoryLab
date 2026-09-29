@@ -35,11 +35,23 @@ async def upload_video_to_youtube(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    final_video_path = os.path.join(str(settings.resolved_project_dir), project_id, "final.mp4")
-    if not os.path.exists(final_video_path):
-        raise HTTPException(status_code=400, detail="Final MP4 video not found. Please render the video first.")
-
+    project_dir = Path(str(settings.resolved_project_dir)) / project_id
+    cand1 = project_dir / "output" / "final_video.mp4"
+    cand2 = project_dir / "final.mp4"
     meta = project.metadata_json or {}
+    cand3 = Path(meta.get("final_video_path")) if meta.get("final_video_path") else None
+
+    final_video_path = None
+    if cand1.exists():
+        final_video_path = str(cand1)
+    elif cand2.exists():
+        final_video_path = str(cand2)
+    elif cand3 and cand3.exists():
+        final_video_path = str(cand3)
+
+    if not final_video_path:
+        raise HTTPException(status_code=400, detail="Final MP4 video not found. Please assemble or render the video first.")
+
     seo_data = meta.get("seo") or meta.get("content_package") or {}
     title = seo_data.get("selected_title") or project.title
     description = seo_data.get("description") or f"Preschool nursery rhyme video: {title}"
@@ -49,16 +61,14 @@ async def upload_video_to_youtube(
     has_oauth = bool(settings.YOUTUBE_CLIENT_ID or os.path.exists("config/youtube_client_secrets.json"))
 
     if not has_oauth:
-        # Mock/Offline Simulation for local development
         upload_record = {
-            "status": "mock_uploaded",
+            "status": "requires_manual_upload",
             "privacy_status": "PRIVATE",
-            "video_id": f"yt_sim_{project_id[:8]}",
-            "video_url": f"https://studio.youtube.com/video/yt_sim_{project_id[:8]}/edit",
             "title": title,
             "description": description[:100] + "...",
             "tags_count": len(tags),
-            "message": "Upload simulated in PRIVATE mode (YouTube OAuth secrets not configured in .env).",
+            "requires_manual_upload": True,
+            "message": "YouTube OAuth secrets not configured in .env. Please use the 1-Click 'Open YouTube Studio & Upload' button to download the video and copy metadata to Studio.",
         }
         meta_copy = dict(meta)
         meta_copy["youtube_upload"] = upload_record

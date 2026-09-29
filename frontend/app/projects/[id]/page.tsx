@@ -25,6 +25,7 @@ import {
  Search,
  Film,
  Download,
+ AlertCircle,
 } from "lucide-react";
 
 export default function ProjectDetailsPage() {
@@ -33,6 +34,7 @@ export default function ProjectDetailsPage() {
  const id = params?.id as string;
 
  const [project, setProject] = useState<Project | null>(null);
+ const [videoLoadError, setVideoLoadError] = useState(false);
  const [loading, setLoading] = useState(true);
  const [activeTab, setActiveTab] = useState<"seo" | "scenes" | "characters" | "assets" | "logs">("seo");
  const [generating, setGenerating] = useState(false);
@@ -206,13 +208,23 @@ export default function ProjectDetailsPage() {
  </a>
  </div>
 
- <div className="aspect-video bg-black rounded-xl overflow-hidden shadow-lg border border-[#E5E5EA]">
+ <div className="aspect-video bg-black rounded-xl overflow-hidden shadow-lg border border-[#E5E5EA] relative flex items-center justify-center">
+ {videoLoadError ? (
+ <div className="text-center p-6 space-y-2 text-white">
+ <AlertCircle className="w-8 h-8 text-amber-400 mx-auto" />
+ <p className="text-xs font-bold">Video stream not available</p>
+ <p className="text-[11px] text-slate-400">Rendering or assembly in progress.</p>
+ </div>
+ ) : (
  <video
  controls
  playsInline
+ key={`proj-vid-${project.id}`}
  className="w-full h-full object-contain"
  src={`http://127.0.0.1:8000/api/v1/projects/${project.id}/video`}
+ onError={() => setVideoLoadError(true)}
  />
+ )}
  </div>
  </div>
  )}

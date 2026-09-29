@@ -51,6 +51,7 @@ import {
  Trash2,
  Zap,
  Lock,
+ AlertCircle,
 } from "lucide-react";
 
 const ACTIVE_PROJ_KEY = "motionstory_active_project_id";
@@ -85,6 +86,7 @@ export default function DashboardPage() {
  const [uploadSuccess, setUploadSuccess] = useState<string | null>(null);
  const [showResetConfirm, setShowResetConfirm] = useState(false);
  const [showYouTubeModal, setShowYouTubeModal] = useState(false);
+ const [videoError, setVideoError] = useState(false);
 
  // Audio player state
  const [isPlayingAudio, setIsPlayingAudio] = useState(false);
@@ -108,25 +110,49 @@ export default function DashboardPage() {
  };
 
  const restoreActiveProjectState = useCallback(async (projectId: string) => {
- try {
- const proj = await api.getProject(projectId);
- if (!proj) return;
- setActiveProject(proj);
+  try {
+   setContentPkgLoading(true);
+   const proj = await api.getProject(projectId);
+   if (!proj) return;
+   setActiveProject(proj);
+   localStorage.setItem(ACTIVE_PROJ_KEY, proj.id);
+   setVideoError(false);
 
- // Restore downstream stages in parallel
- const [pkg, timeline, qc] = await Promise.all([
- api.getContentPackage(projectId).catch(() => null),
- api.getAudioTimeline(projectId).catch(() => null),
- api.getQCReport(projectId).catch(() => null),
- ]);
+   // Restore downstream stages in parallel
+   const [pkg, timeline, qc, sunoPkg] = await Promise.all([
+    api.getContentPackage(projectId).catch(() => null),
+    api.getAudioTimeline(projectId).catch(() => null),
+    api.getQCReport(projectId).catch(() => null),
+    api.getSunoPrompt(projectId).catch(() => null),
+   ]);
 
- if (pkg) setContentPkg(pkg);
- if (timeline) setAudioTimeline(timeline);
- if (qc) setQcResult(qc);
- if (proj.scenes && proj.scenes.length > 0) setScenes(proj.scenes);
- } catch {
- localStorage.removeItem(ACTIVE_PROJ_KEY);
- }
+   if (pkg) {
+    setContentPkg(pkg);
+   } else {
+    const newPkg = await api.generateContentPackage(projectId).catch(() => null);
+    if (newPkg) setContentPkg(newPkg);
+    else setContentPkg(null);
+   }
+
+   if (timeline) setAudioTimeline(timeline);
+   else setAudioTimeline(null);
+
+   if (qc) setQcResult(qc);
+   else setQcResult(null);
+
+   if (sunoPkg) setSunoPackage(sunoPkg);
+   else setSunoPackage(null);
+
+   if (proj.scenes && proj.scenes.length > 0) {
+    setScenes(proj.scenes);
+   } else {
+    setScenes([]);
+   }
+  } catch {
+   localStorage.removeItem(ACTIVE_PROJ_KEY);
+  } finally {
+   setContentPkgLoading(false);
+  }
  }, []);
 
  // Initial load & Restore persistence from localStorage
@@ -215,47 +241,72 @@ export default function DashboardPage() {
 
  // Step 1: Handle selecting topic
  const handleSelectTopic = async (topic: TopicOpportunity) => {
- try {
- setContentPkgLoading(true);
- setContentPkg(null);
- setAudioTimeline(null);
- setSunoPackage(null);
- setScenes([]);
- setQcResult(null);
+  try {
+   setContentPkgLoading(true);
 
- const project = await api.selectTopic({
- topic: topic.topic,
- title: topic.suggested_title,
- category: topic.category,
- target_age: topic.target_age,
- duration: topic.duration || "2–3 Minutes",
- content_angle: topic.content_angle,
- why_worth_considering: topic.why_worth_considering,
- opportunity_signals: topic.opportunity_signals,
- suggested_characters: topic.suggested_characters,
- suggested_story_concept: topic.suggested_story_concept,
- });
+   const normTopic = (topic.topic || "").trim().toLowerCase();
+   const normTitle = (topic.suggested_title || "").trim().toLowerCase();
 
- setActiveProject(project);
- localStorage.setItem(ACTIVE_PROJ_KEY, project.id);
+   // 1. Check if a project matching this topic or title already exists in projects list
+   const existingProj = projects.find((p) => {
+    const pTopic = (p.topic || "").trim().toLowerCase();
+    const pTitle = (p.title || "").trim().toLowerCase();
+    if (normTopic && pTopic && normTopic === pTopic) return true;
+    if (normTitle && pTitle && normTitle === pTitle) return true;
+    if (normTopic && pTitle && (pTitle.includes(normTopic) || normTopic.includes(pTitle))) return true;
+    if (pTopic && normTitle && (normTitle.includes(pTopic) || pTopic.includes(normTitle))) return true;
+    return false;
+   });
 
- // Smooth scroll to Step 2 section immediately
- setTimeout(() => {
- const el = document.getElementById("step-2-section");
- if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
- }, 80);
+   if (existingProj) {
+    // Reuse and restore existing project and its full flow!
+    setActiveProject(existingProj);
+    await restoreActiveProjectState(existingProj.id);
+    setContentPkgLoading(false);
+    setTimeout(() => {
+     const el = document.getElementById("step-2-section");
+     if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 80);
+    return;
+   }
 
- // Auto-fetch/generate content package
- const pkg = await api.generateContentPackage(project.id);
- setContentPkg(pkg);
+   // 2. If new, initialize pipeline
+   setContentPkg(null);
+   setAudioTimeline(null);
+   setSunoPackage(null);
+   setScenes([]);
+   setQcResult(null);
 
- // Refresh project list in background
- loadDashboardData();
- } catch (err: any) {
- alert("Failed to initialize project from topic: " + err.message);
- } finally {
- setContentPkgLoading(false);
- }
+   const project = await api.selectTopic({
+    topic: topic.topic,
+    title: topic.suggested_title,
+    category: topic.category,
+    target_age: topic.target_age,
+    duration: topic.duration || "2–3 Minutes",
+    content_angle: topic.content_angle,
+    why_worth_considering: topic.why_worth_considering,
+    opportunity_signals: topic.opportunity_signals,
+    suggested_characters: topic.suggested_characters,
+    suggested_story_concept: topic.suggested_story_concept,
+   });
+
+   if (project && project.id) {
+    setActiveProject(project);
+    setProjects((prev) => [project, ...prev.filter((x) => x.id !== project.id)]);
+    await restoreActiveProjectState(project.id);
+   }
+
+   setTimeout(() => {
+    const el = document.getElementById("step-2-section");
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+   }, 80);
+
+   loadDashboardData();
+  } catch (err: any) {
+   alert("Failed to initialize project from topic: " + err.message);
+  } finally {
+   setContentPkgLoading(false);
+  }
  };
 
  // Fetch Suno AI Prompt Package
@@ -406,8 +457,12 @@ export default function DashboardPage() {
  audioRef.current.pause();
  setIsPlayingAudio(false);
  } else {
- audioRef.current.play();
+ audioRef.current.play().then(() => {
  setIsPlayingAudio(true);
+ }).catch((e) => {
+ console.warn("Audio playback not supported or audio file unavailable:", e);
+ setIsPlayingAudio(false);
+ });
  }
  };
 
@@ -556,7 +611,21 @@ export default function DashboardPage() {
 
  {/* STEP 1: DISCOVER TOPICS */}
  <section className="space-y-4">
- <TopicDiscovery onSelectTopic={handleSelectTopic} />
+ <TopicDiscovery
+ onSelectTopic={handleSelectTopic}
+ activeTopic={activeProject?.topic || activeProject?.title}
+ activeProjectId={activeProject?.id}
+ activeProject={activeProject}
+ existingProjects={projects}
+ onSelectExistingProject={(p: Project) => {
+ setActiveProject(p);
+ restoreActiveProjectState(p.id);
+ setTimeout(() => {
+ const el = document.getElementById("step-2-section");
+ if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+ }, 80);
+ }}
+ />
  </section>
 
  {/* STEP 2: CONTENT PACKAGE & APPROVED LYRICS (SOURCE OF TRUTH) */}
@@ -576,6 +645,7 @@ export default function DashboardPage() {
  </div>
  ) : contentPkg ? (
  <ContentPackageEditor
+ key={activeProject.id}
  projectId={activeProject.id}
  initialPackage={contentPkg}
  onSaved={(saved) => setContentPkg(saved)}
@@ -955,14 +1025,25 @@ export default function DashboardPage() {
  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
  {/* Video Player */}
  <div className="rounded-2xl overflow-hidden bg-black aspect-video relative flex items-center justify-center border border-[#E5E5EA]">
+ {videoError ? (
+ <div className="text-center p-6 space-y-2 text-white">
+ <AlertCircle className="w-8 h-8 text-amber-400 mx-auto" />
+ <p className="text-xs font-bold">Video stream not available</p>
+ <p className="text-[11px] text-slate-400">Rendering or assembly in progress, or use Step 6-8 above.</p>
+ </div>
+ ) : (
  <video
  controls
+ playsInline
+ key={`page-vid-${activeProject.id}`}
  className="w-full h-full object-cover"
  src={`http://127.0.0.1:8000/api/v1/projects/${activeProject.id}/video`}
  poster={`http://127.0.0.1:8000/api/v1/projects/${activeProject.id}/thumbnail`}
+ onError={() => setVideoError(true)}
  >
  Your browser does not support the video tag.
  </video>
+ )}
  </div>
 
  {/* Approval & Upload Actions */}
@@ -1062,12 +1143,11 @@ export default function DashboardPage() {
  <div
  key={proj.id}
  onClick={() => {
- setActiveProject(proj);
- localStorage.setItem(ACTIVE_PROJ_KEY, proj.id);
- api.getContentPackage(proj.id).then(setContentPkg).catch(() => {});
- api.getAudioTimeline(proj.id).then(setAudioTimeline).catch(() => {});
- api.getQCReport(proj.id).then(setQcResult).catch(() => {});
- if (proj.scenes) setScenes(proj.scenes);
+ restoreActiveProjectState(proj.id);
+ setTimeout(() => {
+ const el = document.getElementById("step-2-section");
+ if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+ }, 80);
  }}
  className={`bg-white hover:bg-[#FAFAFC] border rounded-2xl p-5 transition-all shadow-xs group block space-y-3 cursor-pointer ${
  activeProject?.id === proj.id ? "border-[#FF6B00] ring-2 ring-orange-500/20" : "border-[#E5E5EA]"

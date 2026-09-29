@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { ContentPackage } from "@/lib/types";
 import { api } from "@/lib/api";
 import {
@@ -33,6 +33,10 @@ export function ContentPackageEditor({
  onSaved,
 }: ContentPackageEditorProps) {
  const [pkg, setPkg] = useState<ContentPackage>(initialPackage);
+
+ useEffect(() => {
+  setPkg(initialPackage);
+ }, [initialPackage, projectId]);
  const [saving, setSaving] = useState(false);
  const [regenerating, setRegenerating] = useState(false);
  const [savedSuccess, setSavedSuccess] = useState(false);

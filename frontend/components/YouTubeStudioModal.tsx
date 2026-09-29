@@ -54,6 +54,11 @@ export default function YouTubeStudioModal({
   const [apiUploading, setApiUploading] = useState(false);
   const [apiResult, setApiResult] = useState<{ success: boolean; message: string; url?: string } | null>(null);
 
+  const [studioOpened, setStudioOpened] = useState(false);
+  const [downloadingKit, setDownloadingKit] = useState(false);
+  const [showVideoPreview, setShowVideoPreview] = useState(false);
+  const [videoPreviewError, setVideoPreviewError] = useState(false);
+
   // Sync props when modal opens
   useEffect(() => {
     if (isOpen) {
@@ -62,6 +67,8 @@ export default function YouTubeStudioModal({
       if (defaultTags && defaultTags.length > 0) setTags(defaultTags.join(", "));
       if (defaultHashtags && defaultHashtags.length > 0) setHashtags(defaultHashtags.join(" "));
       setApiResult(null);
+      setStudioOpened(false);
+      setVideoPreviewError(false);
     }
   }, [isOpen, defaultTitle, defaultDescription, defaultTags, defaultHashtags]);
 
@@ -103,13 +110,84 @@ export default function YouTubeStudioModal({
     setTimeout(() => setCopiedField(null), 2500);
   };
 
+  const downloadFile = (url: string, filename: string) => {
+    try {
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch (e) {
+      console.error("Download failed:", e);
+    }
+  };
+
+  const cleanFilename = (name: string) => {
+    return (name || "kids_song").replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 40);
+  };
+
+  const resolvedVideoUrl = videoUrl || `http://127.0.0.1:8000/api/v1/projects/${projectId}/video`;
+  const resolvedThumbUrl = thumbnailUrl || `http://127.0.0.1:8000/api/v1/projects/${projectId}/thumbnail`;
+
   const handleOpenStudio = async () => {
-    // Copy title safely if available
+    // 1. Auto-download the video so the user has the file in their Downloads
+    if (resolvedVideoUrl) {
+      downloadFile(resolvedVideoUrl, `${cleanFilename(title)}.mp4`);
+    }
+    // 2. Copy title safely
     if (title) {
       await safeCopy(title);
       setCopiedField("auto_title");
     }
+    // 3. Activate step-by-step guidance banner
+    setStudioOpened(true);
+    // 4. Open YouTube Studio in new tab
     window.open("https://studio.youtube.com/channel/upload", "_blank", "noopener,noreferrer");
+  };
+
+  const handleDownloadFullKit = () => {
+    setDownloadingKit(true);
+    // Download video
+    if (resolvedVideoUrl) {
+      downloadFile(resolvedVideoUrl, `${cleanFilename(title)}.mp4`);
+    }
+    // Download thumbnail
+    setTimeout(() => {
+      if (resolvedThumbUrl) {
+        downloadFile(resolvedThumbUrl, `${cleanFilename(title)}_thumbnail.jpg`);
+      }
+    }, 400);
+    // Download metadata text file
+    setTimeout(() => {
+      const metaContent = `================================================
+YOUTUBE METADATA PACKAGE
+Topic: ${projectTopic}
+================================================
+
+TITLE:
+${title}
+
+DESCRIPTION:
+${description}
+
+TAGS:
+${tags}
+
+HASHTAGS:
+${hashtags}
+
+STUDIO SETTINGS:
+- Audience: Yes, it's made for kids
+- Category: Education or Entertainment
+- Visibility: Private (Recommended for creator review)
+`;
+      const blob = new Blob([metaContent], { type: "text/plain;charset=utf-8" });
+      const blobUrl = URL.createObjectURL(blob);
+      downloadFile(blobUrl, `${cleanFilename(title)}_metadata.txt`);
+      URL.revokeObjectURL(blobUrl);
+      setDownloadingKit(false);
+    }, 800);
   };
 
   const handleDirectApiUpload = async () => {
@@ -117,23 +195,27 @@ export default function YouTubeStudioModal({
     setApiResult(null);
     try {
       const res = await api.uploadYouTube(projectId, "private");
-      setApiResult({
-        success: true,
-        message: res.message || "Uploaded to YouTube Studio as Private Draft.",
-        url: res.youtube_url || (res as any).video_url,
-      });
+      if ((res as any).requires_manual_upload || res.status === "requires_manual_upload") {
+        setApiResult({
+          success: false,
+          message: res.message || "Google YouTube API credentials not configured in .env. Please use the 1-Click 'Open YouTube Studio & Upload' button to download the video and copy metadata to Studio.",
+        });
+      } else {
+        setApiResult({
+          success: true,
+          message: res.message || "Uploaded to YouTube Studio as Private Draft.",
+          url: res.youtube_url || (res as any).video_url,
+        });
+      }
     } catch (err: any) {
       setApiResult({
         success: false,
-        message: err?.message || "Upload failed. Please check credentials or use YouTube Studio manual upload.",
+        message: err?.message || "Direct API upload failed. Please use YouTube Studio manual upload.",
       });
     } finally {
       setApiUploading(false);
     }
   };
-
-  const resolvedVideoUrl = videoUrl || `http://127.0.0.1:8000/api/v1/projects/${projectId}/video`;
-  const resolvedThumbUrl = thumbnailUrl || `http://127.0.0.1:8000/api/v1/projects/${projectId}/thumbnail`;
 
   return (
     <div
@@ -179,14 +261,114 @@ export default function YouTubeStudioModal({
 
         {/* Modal Scrollable Body */}
         <div className="p-6 overflow-y-auto space-y-5 flex-1">
-          {/* Quick Guidance Alert */}
-          <div className="bg-[#EFF6FF] border border-[#BFDBFE] rounded-xl p-3.5 flex items-start gap-3">
-            <ShieldCheck className="w-5 h-5 text-[#2563EB] shrink-0 mt-0.5" />
-            <div className="text-xs text-[#1E40AF] space-y-1">
-              <span className="font-bold block">100% Safe Creator Workflow</span>
-              <p className="text-[11px] leading-relaxed text-[#1D4ED8]">
-                Click <strong>"Open YouTube Studio"</strong> to launch studio.youtube.com. Your title is automatically copied to clipboard. Copy Description & Tags with 1 click below, or use Direct API Upload in Private mode.
-              </p>
+          {/* Active Studio Assistant Guide (Always available & animated when studio opened) */}
+          <div className={`rounded-2xl p-4 transition-all border ${
+            studioOpened 
+              ? "bg-[#FEF2F2] border-[#FCA5A5] ring-2 ring-red-400/20" 
+              : "bg-[#EFF6FF] border-[#BFDBFE]"
+          }`}>
+            <div className="flex items-start gap-3">
+              <ShieldCheck className={`w-5 h-5 shrink-0 mt-0.5 ${studioOpened ? "text-red-600" : "text-[#2563EB]"}`} />
+              <div className="space-y-2 w-full">
+                <div className="flex items-center justify-between">
+                  <span className={`text-xs font-bold block ${studioOpened ? "text-red-900" : "text-[#1E40AF]"}`}>
+                    {studioOpened ? "🚀 YouTube Studio Opened! Follow these 3 Steps:" : "How YouTube Upload Works (100% Safe Creator Workflow)"}
+                  </span>
+                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                    studioOpened ? "bg-red-100 text-red-700" : "bg-blue-100 text-blue-700"
+                  }`}>
+                    {studioOpened ? "Studio Active" : "Google Security Policy"}
+                  </span>
+                </div>
+                <p className={`text-[11px] leading-relaxed ${studioOpened ? "text-red-800" : "text-[#1D4ED8]"}`}>
+                  Google YouTube Studio does not allow external websites to automatically inject files into studio.youtube.com.
+                  When you click <strong>"Open YouTube Studio"</strong>, your video file automatically downloads and your title is copied!
+                </p>
+
+                {/* 3 Step Interactive Cards */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
+                  {/* Step 1: Video File */}
+                  <div className="bg-white/90 border border-slate-200 rounded-xl p-3 flex flex-col justify-between shadow-2xs">
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[10px] font-extrabold text-red-600 tracking-wider">STEP 1</span>
+                        <Video className="w-3.5 h-3.5 text-slate-400" />
+                      </div>
+                      <span className="text-xs font-bold text-[#1D1D1F] block">Drag Video File</span>
+                      <p className="text-[11px] text-[#6E6E73] mt-1 leading-snug">
+                        Find the downloaded MP4 in your Downloads folder and drop it into YouTube Studio.
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => downloadFile(resolvedVideoUrl, `${cleanFilename(title)}.mp4`)}
+                      className="mt-2.5 text-[11px] font-bold text-red-700 bg-red-50 hover:bg-red-100 py-1.5 px-2.5 rounded-lg flex items-center justify-center gap-1 transition-colors cursor-pointer"
+                    >
+                      <Download className="w-3 h-3 text-red-600" />
+                      <span>Download Video (.mp4)</span>
+                    </button>
+                  </div>
+
+                  {/* Step 2: Title */}
+                  <div className="bg-white/90 border border-slate-200 rounded-xl p-3 flex flex-col justify-between shadow-2xs">
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[10px] font-extrabold text-blue-600 tracking-wider">STEP 2</span>
+                        <FileText className="w-3.5 h-3.5 text-slate-400" />
+                      </div>
+                      <span className="text-xs font-bold text-[#1D1D1F] block">Paste Title</span>
+                      <p className="text-[11px] text-[#6E6E73] mt-1 leading-snug">
+                        Paste (Cmd+V / Ctrl+V) into the Title field in YouTube Studio.
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => copyToClipboard(title, "title")}
+                      className="mt-2.5 text-[11px] font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 py-1.5 px-2.5 rounded-lg flex items-center justify-center gap-1 transition-colors cursor-pointer"
+                    >
+                      {copiedField === "title" ? (
+                        <>
+                          <Check className="w-3 h-3 text-emerald-600" />
+                          <span className="text-emerald-700">Copied!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3 h-3 text-blue-600" />
+                          <span>Copy Title</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  {/* Step 3: Description */}
+                  <div className="bg-white/90 border border-slate-200 rounded-xl p-3 flex flex-col justify-between shadow-2xs">
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[10px] font-extrabold text-purple-600 tracking-wider">STEP 3</span>
+                        <Sparkles className="w-3.5 h-3.5 text-slate-400" />
+                      </div>
+                      <span className="text-xs font-bold text-[#1D1D1F] block">Paste Description</span>
+                      <p className="text-[11px] text-[#6E6E73] mt-1 leading-snug">
+                        Paste lyrics, chapters and hashtags into Description in YouTube Studio.
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => copyToClipboard(description, "description")}
+                      className="mt-2.5 text-[11px] font-bold text-purple-700 bg-purple-50 hover:bg-purple-100 py-1.5 px-2.5 rounded-lg flex items-center justify-center gap-1 transition-colors cursor-pointer"
+                    >
+                      {copiedField === "description" ? (
+                        <>
+                          <Check className="w-3 h-3 text-emerald-600" />
+                          <span className="text-emerald-700">Copied!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3 h-3 text-purple-600" />
+                          <span>Copy Description</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -203,14 +385,21 @@ export default function YouTubeStudioModal({
                   <span className="text-[11px] text-[#86868B] block">Audio & 3D Visuals Synchronized</span>
                 </div>
               </div>
-              <a
-                href={resolvedVideoUrl}
-                download={`video_${projectId.slice(0, 8)}.mp4`}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-[#E5E5EA] hover:bg-[#F5F5F7] text-xs font-semibold text-[#1D1D1F] rounded-lg transition-colors cursor-pointer shadow-2xs"
-              >
-                <Download className="w-3.5 h-3.5 text-[#FF6B00]" />
-                <span>Save Video</span>
-              </a>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowVideoPreview(!showVideoPreview)}
+                  className="px-2.5 py-1.5 bg-white border border-[#E5E5EA] hover:bg-[#F5F5F7] text-[11px] font-semibold text-[#1D1D1F] rounded-lg transition-colors cursor-pointer"
+                >
+                  {showVideoPreview ? "Hide Preview" : "Preview"}
+                </button>
+                <button
+                  onClick={() => downloadFile(resolvedVideoUrl, `${cleanFilename(title)}.mp4`)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-[#E5E5EA] hover:bg-[#F5F5F7] text-xs font-semibold text-[#1D1D1F] rounded-lg transition-colors cursor-pointer shadow-2xs"
+                >
+                  <Download className="w-3.5 h-3.5 text-[#FF6B00]" />
+                  <span>Save Video</span>
+                </button>
+              </div>
             </div>
 
             {/* Thumbnail Card */}
@@ -224,16 +413,37 @@ export default function YouTubeStudioModal({
                   <span className="text-[11px] text-[#86868B] block">High-CTR Toddler Palette</span>
                 </div>
               </div>
-              <a
-                href={resolvedThumbUrl}
-                download={`thumbnail_${projectId.slice(0, 8)}.jpg`}
+              <button
+                onClick={() => downloadFile(resolvedThumbUrl, `${cleanFilename(title)}_thumbnail.jpg`)}
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-[#E5E5EA] hover:bg-[#F5F5F7] text-xs font-semibold text-[#1D1D1F] rounded-lg transition-colors cursor-pointer shadow-2xs"
               >
                 <Download className="w-3.5 h-3.5 text-[#9333EA]" />
                 <span>Save Thumbnail</span>
-              </a>
+              </button>
             </div>
           </div>
+
+          {/* Optional In-Modal Video Player Preview */}
+          {showVideoPreview && (
+            <div className="bg-black rounded-2xl overflow-hidden aspect-video relative flex items-center justify-center border border-slate-800">
+              {videoPreviewError ? (
+                <div className="text-center p-6 space-y-2 text-white">
+                  <AlertCircle className="w-8 h-8 text-amber-400 mx-auto" />
+                  <p className="text-xs font-semibold">Video preview could not be loaded directly.</p>
+                  <p className="text-[11px] text-slate-400">Please use "Save Video" to download and verify locally.</p>
+                </div>
+              ) : (
+                <video
+                  controls
+                  playsInline
+                  src={resolvedVideoUrl}
+                  poster={resolvedThumbUrl}
+                  onError={() => setVideoPreviewError(true)}
+                  className="w-full h-full object-contain"
+                />
+              )}
+            </div>
+          )}
 
           {/* 1. Title Input & Copy */}
           <div className="space-y-1.5">
@@ -420,7 +630,26 @@ export default function YouTubeStudioModal({
             )}
           </div>
 
-          <div className="flex items-center gap-2.5 w-full sm:w-auto justify-end">
+          <div className="flex items-center gap-2.5 w-full sm:w-auto justify-end flex-wrap">
+            <button
+              onClick={handleDownloadFullKit}
+              disabled={downloadingKit}
+              className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-semibold border border-purple-200 bg-purple-50 hover:bg-purple-100 text-purple-700 transition-all cursor-pointer disabled:opacity-50"
+              title="Downloads Video MP4, Thumbnail JPG, and YouTube Metadata Text File all at once"
+            >
+              {downloadingKit ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span>Packaging Kit...</span>
+                </>
+              ) : (
+                <>
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Download Full Kit</span>
+                </>
+              )}
+            </button>
+
             <button
               onClick={handleDirectApiUpload}
               disabled={apiUploading}

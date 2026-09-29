@@ -34,6 +34,7 @@ import {
  ImageIcon,
  Upload,
  Activity,
+ AlertCircle,
 } from "lucide-react";
 import { InteractiveEngineFlow } from "@/components/InteractiveEngineFlow";
 import YouTubeStudioModal from "@/components/YouTubeStudioModal";
@@ -109,6 +110,8 @@ export function ManualWorkflowView({ initialProjectId, onProjectChange }: Manual
  const [copiedKey, setCopiedKey] = useState<string | null>(null);
  const [generatingThumb, setGeneratingThumb] = useState<boolean>(false);
  const [thumbTimestamp, setThumbTimestamp] = useState<number>(Date.now());
+ const [videoTimestamp, setVideoTimestamp] = useState<number>(Date.now());
+ const [videoLoadError, setVideoLoadError] = useState<boolean>(false);
  const [thumbError, setThumbError] = useState<string | null>(null);
  const [thumbPrompt, setThumbPrompt] = useState<string>("");
  const [copiedThumbPrompt, setCopiedThumbPrompt] = useState<boolean>(false);
@@ -594,6 +597,8 @@ export function ManualWorkflowView({ initialProjectId, onProjectChange }: Manual
  const result = await api.generateFinalVideoFromUploads(selectedProjectId);
  setFinalVideoResult(result);
  setThumbTimestamp(Date.now());
+ setVideoTimestamp(Date.now());
+ setVideoLoadError(false);
  const readyData = await api.checkAssemblyReadiness(selectedProjectId).catch(() => null);
  if (readyData) setReadiness(readyData);
  } catch (err: any) {
@@ -1939,13 +1944,23 @@ export function ManualWorkflowView({ initialProjectId, onProjectChange }: Manual
  <Film className="w-3.5 h-3.5 text-emerald-600" />
  Master Video Player (1080p Full Song)
  </span>
- <div className="rounded-2xl overflow-hidden bg-black aspect-video shadow-xl">
+ <div className="rounded-2xl overflow-hidden bg-black aspect-video shadow-xl relative flex items-center justify-center">
+ {videoLoadError ? (
+ <div className="text-center p-6 space-y-2 text-white">
+ <AlertCircle className="w-8 h-8 text-amber-400 mx-auto" />
+ <p className="text-xs font-bold">Video stream not ready</p>
+ <p className="text-[11px] text-slate-400">Please click "Assemble Final Video" above or download the MP4 file.</p>
+ </div>
+ ) : (
  <video
- src={`${API_BASE}/api/v1/projects/${selectedProjectId}/assembly/final-video?t=${Date.now()}`}
+ key={`final-vid-${selectedProjectId}-${videoTimestamp}`}
+ src={`${API_BASE}/api/v1/projects/${selectedProjectId}/assembly/final-video?t=${videoTimestamp}`}
  controls
  playsInline
+ onError={() => setVideoLoadError(true)}
  className="w-full h-full"
  />
+ )}
  </div>
  </div>
 

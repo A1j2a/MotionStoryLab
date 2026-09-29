@@ -84,6 +84,8 @@ export function StoryboardView({
  const [copiedThumbnailPrompt, setCopiedThumbnailPrompt] = useState(false);
  const [regeneratingThumb, setRegeneratingThumb] = useState(false);
  const [thumbTimestamp, setThumbTimestamp] = useState<number>(Date.now());
+ const [videoTimestamp, setVideoTimestamp] = useState<number>(Date.now());
+ const [videoError, setVideoError] = useState<boolean>(false);
 
  const handleRunAiMatch = async () => {
  if (!projectId) return;
@@ -1092,6 +1094,8 @@ ${prompt}`;
  try {
  const res = await api.generateFinalVideoFromUploads(projectId);
  setFinalVideoResult(res);
+ setVideoTimestamp(Date.now());
+ setVideoError(false);
  if (onSceneRerendered) onSceneRerendered();
  } catch (err: any) {
  setAssembleError(err?.message || "Assembly failed");
@@ -1155,13 +1159,23 @@ ${prompt}`;
  </div>
 
  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
- <div className="aspect-video bg-black rounded-2xl overflow-hidden shadow-md">
+ <div className="aspect-video bg-black rounded-2xl overflow-hidden shadow-md relative flex items-center justify-center">
+ {videoError ? (
+ <div className="text-center p-6 space-y-2 text-white">
+ <AlertCircle className="w-8 h-8 text-amber-400 mx-auto" />
+ <p className="text-xs font-bold">Video stream not ready</p>
+ <p className="text-[11px] text-slate-400">Please click "Assemble Final Video" or download the MP4 file.</p>
+ </div>
+ ) : (
  <video
- src={`${API_BASE}/api/v1/projects/${projectId}/assembly/final-video?t=${Date.now()}`}
+ key={`storyboard-vid-${projectId}-${videoTimestamp}`}
+ src={`${API_BASE}/api/v1/projects/${projectId}/assembly/final-video?t=${videoTimestamp}`}
  controls
  playsInline
+ onError={() => setVideoError(true)}
  className="w-full h-full"
  />
+ )}
  </div>
  <div className="relative aspect-video rounded-2xl overflow-hidden bg-slate-900 border border-[#E5E5EA] shadow-md group">
  <img

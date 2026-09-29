@@ -104,6 +104,7 @@ async def trigger_generation(
 
 
 @router.get("/{project_id}/video")
+@router.head("/{project_id}/video")
 async def get_project_video(
     project_id: str,
     session: AsyncSession = Depends(get_db_session),
@@ -118,12 +119,22 @@ async def get_project_video(
     if not video_path.exists():
         video_path = project_dir / "final.mp4"
     if not video_path.exists():
+        meta = project.metadata_json or {}
+        if meta.get("final_video_path") and Path(meta.get("final_video_path")).exists():
+            video_path = Path(meta.get("final_video_path"))
+    if not video_path.exists():
         raise HTTPException(status_code=404, detail="Video rendering or assembly not yet complete")
 
-    return FileResponse(str(video_path), media_type="video/mp4", filename=f"{project.title}.mp4")
+    return FileResponse(
+        str(video_path),
+        media_type="video/mp4",
+        content_disposition_type="inline",
+        filename=f"{project.title}.mp4",
+    )
 
 
 @router.get("/{project_id}/thumbnail")
+@router.head("/{project_id}/thumbnail")
 async def get_project_thumbnail(
     project_id: str,
     session: AsyncSession = Depends(get_db_session),
@@ -185,7 +196,7 @@ async def get_project_thumbnail(
     if not thumb_path.exists():
         raise HTTPException(status_code=404, detail="Thumbnail not yet generated")
 
-    return FileResponse(str(thumb_path), media_type="image/jpeg", filename="thumbnail.jpg")
+    return FileResponse(str(thumb_path), media_type="image/jpeg", content_disposition_type="inline", filename="thumbnail.jpg")
 
 
 @router.get("/{project_id}/seo")
