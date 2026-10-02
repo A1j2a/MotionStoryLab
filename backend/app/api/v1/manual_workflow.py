@@ -1287,6 +1287,9 @@ async def check_assembly_readiness(
     }
 
 
+_assembly_locks: Dict[str, asyncio.Lock] = {}
+
+
 @router.post("/{project_id}/assembly/generate-final-video", response_model=Dict[str, Any])
 async def generate_final_video_from_uploads(
     project_id: str,
@@ -1296,12 +1299,19 @@ async def generate_final_video_from_uploads(
     Final video assembly using uploaded scene videos + existing song audio + SRT.
     Uses existing FFmpeg compositor. No AI video generation.
     """
-    project_repo = ProjectRepository(session)
-    project = await project_repo.get(project_id)
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    if project_id not in _assembly_locks:
+        _assembly_locks[project_id] = asyncio.Lock()
+    lock = _assembly_locks[project_id]
+    if lock.locked():
+        raise HTTPException(status_code=409, detail="Assembly is already running for this project. Please wait for it to complete.")
 
-    project_dir = Path(str(settings.resolved_project_dir)) / project_id
+    async with lock:
+        project_repo = ProjectRepository(session)
+        project = await project_repo.get(project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        project_dir = Path(str(settings.resolved_project_dir)) / project_id
     output_dir = project_dir / "output"
     output_dir.mkdir(parents=True, exist_ok=True)
     final_video = output_dir / "final_video.mp4"
@@ -1559,7 +1569,8 @@ def _assemble_final_video(
     concat_txt_path = work_dir / "concat_scenes_list.txt"
     with open(concat_txt_path, "w", encoding="utf-8") as f:
         for np in normalized_scenes:
-            f.write(f"file '{str(np)}'\n")
+            # Use absolute resolved paths to avoid relative path resolution errors in FFmpeg concat demuxer
+            f.write(f"file '{str(Path(np).resolve())}'\n")
     temp_files_to_clean.append(concat_txt_path)
 
     scenes_body_raw = work_dir / "scenes_body_raw.mp4"
@@ -1594,7 +1605,7 @@ def _assemble_final_video(
             fc_inputs = []
             fc_filter = ""
             for i, np in enumerate(normalized_scenes):
-                fc_inputs.extend(["-i", str(np)])
+                fc_inputs.extend(["-i", str(Path(np).resolve())])
                 fc_filter += f"[{i}:v:0][{i}:a:0]"
             fc_filter += f"concat=n={len(normalized_scenes)}:v=1:a=1[v_cat][a_cat]"
             fc_cmd = [
@@ -1610,8 +1621,10 @@ def _assemble_final_video(
             if res_fc.returncode == 0 and scenes_body_raw.exists() and scenes_body_raw.stat().st_size > 1000:
                 concat_success = True
             else:
-                err_msg = res_fc.stderr or res_re.stderr or res_cat.stderr or "Unknown FFmpeg error"
-                raise RuntimeError(f"FFmpeg scene concatenation failed: {err_msg[:400]}")
+                raw_err = res_fc.stderr or res_re.stderr or res_cat.stderr or "Unknown FFmpeg error"
+                err_lines = [l for l in raw_err.strip().splitlines() if not l.startswith("  ") and not l.startswith("ffmpeg version") and not l.startswith("built with") and not l.startswith("configuration:") and not l.startswith("lib")]
+                clean_err = "\n".join(err_lines[-8:]) if err_lines else raw_err[-300:]
+                raise RuntimeError(f"FFmpeg scene concatenation failed: {clean_err}")
 
     # ── STEP 3: Multi-Track Audio Mixing (Scene SFX + Song Track) & Subtitles ──
     scenes_body_mixed = work_dir / "scenes_body_mixed.mp4"
@@ -1754,7 +1767,7 @@ def _assemble_final_video(
     if len(clips_to_stitch) > 1:
         with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
             for c in clips_to_stitch:
-                f.write(f"file '{str(c)}'\n")
+                f.write(f"file '{str(Path(c).resolve())}'\n")
             full_concat_txt = f.name
         temp_files_to_clean.append(Path(full_concat_txt))
 

@@ -244,7 +244,7 @@ Return a valid JSON object with the following EXACT structure:
   ],
   "music_style": "120 BPM cheerful preschool pop with marimba, acoustic guitar, warm bass, and clap rhythm",
   "voice_style": "Warm cheerful preschool storyteller with clear articulation",
-  "thumbnail_prompt": "Cute 3D CGI cartoon animation of [Character] smiling happily in [Environment], 8k vibrant lighting, high CTR YouTube Kids thumbnail",
+  "thumbnail_prompt": "A vibrant 3D Pixar-style YouTube thumbnail, 16:9 aspect ratio. Four cheerful cute anthropomorphic 3D [characters themed around topic] mid-dance pose filling the frame, with cute round faces, big expressive glossy googly eyes, wide joyful open-mouth smiles, and arms raised playfully in celebration. Floating colorful musical notes and confetti in the air. Bright cheerful [thematic environment] with soft rainbow gradient, bokeh, and magical glowing highlights. Pixar DreamWorks glossy clay 3D render style, ultra vibrant saturated colors, soft rim lighting, smooth reflective highlights. At top center, bold 3D rainbow bubble typography reading '[CATCHY HOOK]!' with thick white border and soft drop shadow. Eye-catching, hyper-colorful, toddler-friendly, high resolution, 8k.",
   "target_audience": "{target_age}",
   "educational_angle": "Rhythm recognition, phonics, vocabulary and cooperative play",
   "visual_bible": {{
@@ -354,7 +354,11 @@ Return a valid JSON object with the following EXACT structure:
         ],
         "music_style": "120 BPM cheerful preschool pop with marimba, acoustic guitar, warm bass, and clapping rhythm",
         "voice_style": "Warm cheerful preschool storyteller with clear articulation",
-        "thumbnail_prompt": f"Cute 3D CGI cartoon animation of {clean_topic} smiling happily in vibrant meadow, 8k lighting, YouTube Kids thumbnail",
+        "thumbnail_prompt": (
+            lambda: __import__("renderer.compositor", fromlist=["build_high_ctr_thumbnail_prompt"]).build_high_ctr_thumbnail_prompt(
+                clean_topic, clean_topic
+            )
+        )(),
         "target_audience": target_age,
         "educational_angle": "Rhythm recognition, vocabulary, counting, and cooperative play",
         "visual_bible": {
@@ -588,7 +592,11 @@ Return a valid JSON object with the following EXACT structure:
         ],
         "music_style": "120 BPM cheerful preschool pop with marimba, acoustic guitar, warm bass, and clapping rhythm",
         "voice_style": "Warm cheerful preschool storyteller with clear articulation",
-        "thumbnail_prompt": f"Cute 3D CGI cartoon animation of {clean_topic} smiling happily in vibrant meadow, 8k lighting, YouTube Kids thumbnail",
+        "thumbnail_prompt": (
+            lambda: __import__("renderer.compositor", fromlist=["build_high_ctr_thumbnail_prompt"]).build_high_ctr_thumbnail_prompt(
+                clean_topic, clean_topic
+            )
+        )(),
         "target_audience": target_age,
         "educational_angle": "Rhythm recognition, vocabulary, counting, and cooperative play",
         "visual_bible": {

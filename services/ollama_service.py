@@ -64,10 +64,16 @@ async def chat_completions(req: ChatRequest):
         if m.role == "user":
             user_prompt = m.content
 
+    is_thumbnail = "thumbnail" in user_prompt.lower()
     is_topic_research = "topic opportunities" in user_prompt or "Find Today" in user_prompt or "kids video topic" in user_prompt
-    is_seo = "YouTube" in user_prompt or "SEO" in user_prompt or "metadata" in user_prompt
-    
-    if is_topic_research:
+    is_seo = ("YouTube" in user_prompt or "SEO" in user_prompt or "metadata" in user_prompt) and not is_thumbnail
+
+    if is_thumbnail:
+        from renderer.compositor import build_high_ctr_thumbnail_prompt
+        topic_match = re.search(r"topic: '([^']+)'", user_prompt) or re.search(r"topic '([^']+)'", user_prompt)
+        topic = topic_match.group(1) if topic_match else "Kids Fun Song"
+        content = build_high_ctr_thumbnail_prompt(topic, topic)
+    elif is_topic_research:
         from ai.topic_researcher import CURATED_TOPIC_POOL
         import random
         shuffled = list(CURATED_TOPIC_POOL)
@@ -160,7 +166,7 @@ async def chat_completions(req: ChatRequest):
         "choices": [
             {
                 "index": 0,
-                "message": {"role": "assistant", "content": json.dumps(content, indent=2)},
+                "message": {"role": "assistant", "content": json.dumps(content, indent=2) if isinstance(content, (dict, list)) else str(content)},
                 "finish_reason": "stop",
             }
         ],

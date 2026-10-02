@@ -404,101 +404,50 @@ def build_high_ctr_thumbnail_prompt(
     environment: str = "",
 ) -> str:
     """
-    Builds an ultra-high CTR 3D Disney Pixar style YouTube thumbnail prompt based on the specific topic.
-    Uses DeepSeek / AI Provider for rich dynamic prompt generation.
-    Strictly specifies NO TEXT / NO WATERMARK so that clean typography can be overlaid.
+    Builds an ultra-high CTR 3D Disney Pixar style YouTube thumbnail prompt dynamically tailored to any topic.
+    Low-code, zero hardcoded topics: adapts seamlessly to any subject, characters, and environment.
     """
     clean_topic = topic or title or "Preschool Kids Song"
     for sep in ["|", ":", " - ", "—", "(", "["]:
         if sep in clean_topic:
             clean_topic = clean_topic.split(sep)[0].strip()
 
-    # Try generating high-CTR prompt with DeepSeek / AI Provider
+    hook_title = extract_short_thumbnail_title(title, clean_topic)
+    char_desc = appearance or (f"{character_name}, cute 3D character" if character_name and character_name != "Hero" else f"cheerful {clean_topic}")
+    env_desc = environment or f"vibrant magical world themed around {clean_topic}"
+
+    # 1. AI Provider Generation (Ideogram / Flux / DALL-E 3 optimized)
     try:
         from ai.providers import get_ai_provider
         provider = get_ai_provider()
-        ai_req = f"""You are an elite YouTube Kids thumbnail designer and prompt engineer specializing in 3D Pixar/CoComelon CGI preschool artwork.
-Song Title: '{title}'
-Topic: '{clean_topic}'
-Hero Character: {character_name} ({appearance or 'cute 3D preschool character with sparkling joyful cartoon eyes and bright smile'})
-Setting: {environment or 'vibrant magical preschool world with sunny skies and rainbow'}
-
-Write ONE single-paragraph, ultra-high CTR 3D Pixar/Disney CGI YouTube cover prompt for AI Image Generators (Wan AI / Flux Dev / Midjourney).
-
-Rules:
-- 3D Disney Pixar CGI animation style, vibrant saturated preschool candy palette, 8K Unreal Engine 5 render.
-- Large expressive glossy cartoon eyes, warm joyful smiles, soft porcelain skin with subsurface scattering.
-- Welcoming dynamic toddler pose, vibrant thematic props, warm golden sunny rim lighting with volumetric sunbeams.
-- Must end with: 'strictly NO text, NO words, NO letters, NO watermark, NO logo.'
-- Return ONLY the final prompt text string, with no introduction, quotes, or markdown."""
-        ai_res = provider.generate_text(ai_req, "You are a master 3D Pixar thumbnail prompt creator. Return only the prompt string.")
-        if ai_res and len(ai_res.strip()) > 50:
-            clean_prompt = ai_res.strip().replace('"', '').replace('\n', ' ')
-            if "no text" not in clean_prompt.lower():
-                clean_prompt += ", strictly NO text, NO words, NO letters, NO watermark, NO logo."
-            return clean_prompt
+        ai_req = (
+            f"Write a 1-paragraph ultra-high CTR 3D Pixar YouTube thumbnail prompt for topic: '{clean_topic}', "
+            f"title hook: '{hook_title}', character: '{char_desc}', setting: '{env_desc}'. "
+            f"Must start with 'A vibrant 3D Pixar-style YouTube thumbnail, 16:9 aspect ratio.' "
+            f"Include cute anthropomorphic characters mid-dance with big glossy googly eyes and open-mouth smiles, "
+            f"floating musical notes & confetti, bright colorful {clean_topic} background, 3D glossy render, "
+            f"and at top center bold 3D rainbow bubble typography reading '{hook_title}'. "
+            f"Output ONLY the prompt text, no JSON or markdown."
+        )
+        ai_res = provider.generate_text(ai_req, "You are a master 3D Pixar thumbnail prompt creator. Return only the single prompt string.")
+        if ai_res and len(ai_res.strip()) > 60:
+            clean = ai_res.strip().replace('"', '').replace('\n', ' ')
+            if not clean.startswith("{") and "title_variants" not in clean and "verses" not in clean:
+                return clean
     except Exception as e:
-        logger.debug(f"DeepSeek dynamic thumbnail prompt generation fallback: {e}")
+        logger.debug(f"AI thumbnail prompt generation fallback: {e}")
 
-    clean_lower = clean_topic.lower()
-
-    if "bus" in clean_lower or "wheels" in clean_lower:
-        subject = (
-            "An adorable cheerful 3D cartoon blue preschool bus with big smiling expressive cartoon eyes "
-            "on the windshield, cute friendly face, and rosy cheeks. Happy baby animal passengers (fluffy puppy, smiling bear cub, "
-            "playful bunny) peeking joyfully out of colorful open windows and waving"
-        )
-        setting = (
-            "driving merrily along a winding sunny rainbow hilltop road, colorful blooming flowers, "
-            "puffy soft white clouds, and a bright glowing rainbow arc in a vibrant turquoise sky with a smiling friendly sun"
-        )
-    elif "rain" in clean_lower or "cloud" in clean_lower or "storm" in clean_lower:
-        subject = (
-            "An adorable cute 3D preschool character wearing a glossy bright yellow raincoat and cute rainboots, "
-            "holding a vibrant rainbow-striped umbrella, smiling with big sparkling joyful eyes, splashing playfully in clear puddles"
-        )
-        setting = (
-            "a magical cheerful rain shower with sparkling animated raindrops, a friendly smiling cartoon cloud, "
-            "and a brilliant glowing rainbow arc bursting through warm golden sunshine"
-        )
-    elif "dino" in clean_lower:
-        subject = (
-            "An adorable cute friendly baby 3D cartoon dinosaur with oversized sparkling eyes, "
-            "gentle cheerful smile, and vibrant pastel-colored scales, jumping with pure joy"
-        )
-        setting = (
-            "a lush prehistoric preschool wonderland with giant colorful fantasy flowers, soft rounded hills, "
-            "sparkling waterfalls, and warm sunny golden rim lighting"
-        )
-    elif "farm" in clean_lower or "animal" in clean_lower or "macdonald" in clean_lower:
-        subject = (
-            "A group of adorable cute 3D baby farm animals (smiling baby calf, fluffy yellow chick, playful little lamb) "
-            "dancing and smiling happily together with huge expressive eyes"
-        )
-        setting = (
-            "a sunny green farm meadow in front of a cozy red barn, white picket fences, sunflowers, "
-            "and a radiant blue sky with gentle fluffy clouds"
-        )
-    else:
-        char_desc = appearance or f"cute lovable 3D animated character {character_name}"
-        subject = (
-            f"{char_desc}, smiling happily with big expressive sparkling joyful eyes, rosy cheeks, "
-            "and an energetic excited welcoming pose"
-        )
-        setting = (
-            f"a vibrant magical preschool world themed around {clean_topic}, filled with playful rounded props, "
-            "blooming pastel flowers, sparkling fairy dust, and a glowing colorful rainbow in a sunny sky"
-        )
-
-    prompt = (
-        f"3D Disney Pixar CGI animation style YouTube Kids Thumbnail artwork for \"{clean_topic}\": "
-        f"{subject}. "
-        f"Setting: {setting}. "
-        f"Visual Quality: 8k ultra-detailed CGI render, vibrant saturated preschool candy palette, "
-        f"Unreal Engine 5 aesthetic, soft cinematic sunny rim lighting, volumetric glow, high-CTR YouTube Kids cover composition, "
-        f"strictly NO text, NO words, NO letters, NO watermark, NO logo."
+    # 2. Universal Dynamic Template (No hardcoded topics - works 100% dynamically for any topic)
+    return (
+        f"A vibrant 3D Pixar-style YouTube thumbnail, 16:9 aspect ratio. "
+        f"Four cheerful cute anthropomorphic 3D {clean_topic} characters ({char_desc}) mid-dance pose filling the frame, "
+        f"with cute round faces, big expressive glossy googly eyes, wide joyful open-mouth smiles, and arms raised playfully in celebration. "
+        f"Floating colorful musical notes, confetti, and sparkles in the air. "
+        f"Bright cheerful {env_desc} with soft rainbow gradient, bokeh, and magical glowing highlights. "
+        f"Pixar DreamWorks glossy clay 3D render style, ultra vibrant saturated colors, soft rim lighting, smooth reflective highlights. "
+        f"At the top center, bold 3D rainbow bubble typography reading \"{hook_title}\" with thick white border and soft drop shadow. "
+        f"Eye-catching, hyper-colorful, toddler-friendly, high resolution, 8k."
     )
-    return prompt
 
 
 def generate_high_ctr_thumbnail(
