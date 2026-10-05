@@ -59,7 +59,7 @@ async def generate_project_seo(
         raise HTTPException(status_code=404, detail="Project not found")
 
     topic = (payload and payload.topic) or project.topic or project.title or "Nursery Rhymes"
-    provider = get_ai_provider()
+    provider = get_ai_provider(prefer_cloud=True)
 
     prompt = f"""Generate a high-converting YouTube Kids SEO metadata package for the preschool topic: "{topic}".
 Return ONLY a valid JSON object with these EXACT keys:

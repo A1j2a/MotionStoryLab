@@ -365,7 +365,7 @@ def discover_kids_topics(
     'Oh No!' story arc channel formula and Live AI reasoning.
     Strictly enforces permanent storage in SQLite so used topics are NEVER repeated.
     """
-    provider = get_ai_provider()
+    provider = get_ai_provider(prefer_cloud=True)
     model_name = getattr(provider, "model", "default")
 
     age_str = target_age if target_age and target_age.lower() != "all" else "Ages 2-5 (Toddlers & Preschoolers)"

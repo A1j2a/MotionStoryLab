@@ -29,6 +29,7 @@ AVAILABLE_MODELS = [
     {"id": "google/gemini-2.0-flash-exp:free", "name": "Google Gemini 2.0 Flash Free (100% Free - Fast & High Context)", "is_free": True},
     {"id": "deepseek/deepseek-r1:free", "name": "DeepSeek R1 Free (100% Free - Deep Reasoning)", "is_free": True},
     {"id": "liquid/lfm-2.5-2.6b:free", "name": "Liquid LFM 2.5 Free (100% Free - Fast Testing)", "is_free": True},
+    {"id": "anthropic/claude-3.5-sonnet", "name": "Anthropic Claude 3.5 Sonnet (Most Powerful - Best Scripts, SEO & Prompts)", "is_free": False},
     {"id": "meta-llama/llama-3.3-70b-instruct", "name": "Meta Llama 3.3 70B (Paid SOTA - SEO, Storyboards & Rhymes)", "is_free": False},
     {"id": "qwen/qwen-2.5-72b-instruct", "name": "Qwen 2.5 72B (Paid SOTA - Elite Songwriting & Rhyme Cadence)", "is_free": False},
     {"id": "deepseek/deepseek-r1", "name": "DeepSeek R1 (Paid SOTA - Full Reasoning & Deep Research)", "is_free": False},
@@ -641,14 +642,15 @@ async def test_openrouter_connection(payload: TestOpenRouterRequest):
     prompt = "Respond with exactly one short cheerful sentence: 'OpenRouter connection verified successfully for MotionStoryLab!'"
     system_prompt = "You are a helpful AI diagnostic assistant. Output plain text only."
 
-    response_text = provider.generate_text(prompt, system_prompt, max_tokens=150)
+    # Directly test OpenRouter API without fallback to local Ollama
+    response_text = provider._call_api(prompt, system_prompt, max_tokens=150)
     latency_ms = int((time.time() - start_time) * 1000)
 
     if not response_text:
         last_err = getattr(provider, "last_error", "")
-        detail_msg = f"OpenRouter error for model '{model}': {last_err}" if last_err else f"OpenRouter call failed for model '{model}'. Please check model slug or credits."
+        detail_msg = f"OpenRouter connection failed: {last_err}" if last_err else f"OpenRouter call failed for model '{model}'. Please check your API key, model slug, or credits."
         raise HTTPException(
-            status_code=502,
+            status_code=400 if ("401" in last_err or "Key not set" in last_err) else 502,
             detail=detail_msg,
         )
 

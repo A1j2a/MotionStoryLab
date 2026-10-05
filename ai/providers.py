@@ -220,7 +220,13 @@ class OpenRouterProvider(BaseAIProvider):
     def generate_json(self, prompt: str, system_prompt: str = "", max_tokens: Optional[int] = None) -> Optional[Dict[str, Any]]:
         raw = self._call_api(prompt, system_prompt, max_tokens=max_tokens)
         if not raw:
-            logger.info("OpenRouter returned no response.")
+            logger.info("OpenRouter returned no response. Cascading to local Ollama provider...")
+            try:
+                res = OllamaProvider().generate_json(prompt, system_prompt, max_tokens=max_tokens)
+                if res:
+                    return res
+            except Exception as e:
+                logger.warning(f"Ollama cascade failed: {e}")
             return None
         parsed = extract_and_repair_json(raw)
         if parsed is None:
@@ -239,6 +245,11 @@ class OpenRouterProvider(BaseAIProvider):
     def generate_text(self, prompt: str, system_prompt: str = "", max_tokens: Optional[int] = None) -> Optional[str]:
         raw = self._call_api(prompt, system_prompt, max_tokens=max_tokens)
         if not raw:
+            logger.info("OpenRouter returned no text. Cascading to local Ollama provider...")
+            try:
+                return OllamaProvider().generate_text(prompt, system_prompt, max_tokens=max_tokens)
+            except Exception as e:
+                logger.warning(f"Ollama text cascade failed: {e}")
             return None
         _record_ai_call("OpenRouter", self.model)
         return re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
@@ -481,11 +492,11 @@ class FallbackAIProvider(BaseAIProvider):
         return "Preschool AI Fallback Generated Text"
 
 
-def get_ai_provider() -> BaseAIProvider:
+def get_ai_provider(prefer_cloud: bool = False) -> BaseAIProvider:
     """
     Factory function: Returns configured AI provider.
     Checks SQLite studio_config first, then environment variables.
-    OpenRouter (if enabled) -> Claude -> OmniRoute -> Ollama -> Fallback.
+    OpenRouter (if enabled or prefer_cloud) -> Claude -> OmniRoute -> Ollama -> Fallback.
     """
     db_enabled = _get_db_config("OPENROUTER_ENABLED")
     db_key = _get_db_config("OPENROUTER_API_KEY")
@@ -493,12 +504,15 @@ def get_ai_provider() -> BaseAIProvider:
 
     openrouter_enabled = (db_enabled.lower() in ("true", "1", "yes")) if db_enabled else (os.environ.get("OPENROUTER_ENABLED", "false").strip().lower() in ("true", "1", "yes"))
     openrouter_key = db_key or os.environ.get("OPENROUTER_API_KEY", "").strip()
-    openrouter_model = db_model or os.environ.get("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct").strip()
+    openrouter_model = db_model or os.environ.get("OPENROUTER_MODEL", "anthropic/claude-3.5-sonnet").strip()
     preferred = os.environ.get("AI_PROVIDER", "").strip().lower()
 
-    is_test_key = openrouter_key.startswith("sk-or-v1-test") or "testkey" in openrouter_key
-    if (openrouter_enabled or preferred == "openrouter") and openrouter_key and not is_test_key:
+    is_test_key = openrouter_key.startswith("sk-or-v1-test") or "testkey" in openrouter_key.lower()
+    if (openrouter_enabled or prefer_cloud or preferred == "openrouter") and openrouter_key and not is_test_key:
         return OpenRouterProvider(api_key=openrouter_key, model=openrouter_model)
+
+    if (preferred == "claude" or prefer_cloud) and os.environ.get("ANTHROPIC_API_KEY"):
+        return ClaudeProvider()
 
     if preferred == "omniroute":
         return OmniRouteProvider()

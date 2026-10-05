@@ -65,44 +65,51 @@ async def chat_completions(req: ChatRequest):
             user_prompt = m.content
 
     is_thumbnail = "thumbnail" in user_prompt.lower()
-    is_topic_research = "topic opportunities" in user_prompt or "Find Today" in user_prompt or "kids video topic" in user_prompt
-    is_seo = ("YouTube" in user_prompt or "SEO" in user_prompt or "metadata" in user_prompt) and not is_thumbnail
+    is_topic_research = (
+        "topic opportunities" in user_prompt.lower()
+        or "find today" in user_prompt.lower()
+        or "kids video topic" in user_prompt.lower()
+        or "video topics" in user_prompt.lower()
+        or "oh no!" in user_prompt.lower()
+    )
+    is_seo = ("youtube" in user_prompt.lower() or "seo" in user_prompt.lower() or "metadata" in user_prompt.lower()) and not is_thumbnail
 
     if is_thumbnail:
         from renderer.compositor import build_high_ctr_thumbnail_prompt
-        topic_match = re.search(r"topic: '([^']+)'", user_prompt) or re.search(r"topic '([^']+)'", user_prompt)
+        topic_match = re.search(r"topic:?\s*['\"]([^'\"]+)['\"]", user_prompt)
         topic = topic_match.group(1) if topic_match else "Kids Fun Song"
         content = build_high_ctr_thumbnail_prompt(topic, topic)
     elif is_topic_research:
-        from ai.topic_researcher import CURATED_TOPIC_POOL
         import random
-        shuffled = list(CURATED_TOPIC_POOL)
-        random.shuffle(shuffled)
-        content = {"topics": shuffled[:12]}
+        from ai.topic_researcher import _dynamic_procedural_fallback
+        topics = _dynamic_procedural_fallback(
+            count=12,
+            seed_val=random.randint(1000, 999999),
+            used_titles=set(),
+            used_chars=set(),
+            used_objs=set(),
+            target_age="Preschool",
+            duration="2-3 Minutes",
+        )
+        content = {"topics": topics}
     elif is_seo:
-        topic_match = re.search(r"topic '([^']+)'", user_prompt)
+        topic_match = (
+            re.search(r'topic:?\s*["\']([^"\']+)["\']', user_prompt, re.IGNORECASE)
+            or re.search(r'topic\s+["\']([^"\']+)["\']', user_prompt, re.IGNORECASE)
+        )
         topic = topic_match.group(1) if topic_match else "Preschool Nursery Rhymes"
-        clean_t = topic.strip().capitalize()
+        clean_t = topic.strip().title()
         content = {
+            "title": f"{clean_t} 🌟 Nursery Rhymes & Kids Songs | 3D Animation for Toddlers",
             "title_variants": [
                 f"{clean_t} 🌟 Best Kids Songs & Nursery Rhymes for Toddlers",
                 f"The {clean_t} Song! 🎈 Fun Sing-Along Animation for Children",
                 f"Sing with Us: {clean_t} ✨ Super Fun Preschool Learning",
             ],
-            "description": f"Join our sunny friends as we sing and dance to {clean_t}! Perfect for toddlers and preschoolers to learn rhythm and vocabulary.\n\n⏱️ Chapters:\n00:00 - Welcome & Sing-Along\n00:15 - Happy Verse Dance\n00:30 - Chorus Together\n00:45 - Goodbye & Sweet Dreams",
+            "description": f"Welcome to our magical world of preschool music and joyful discovery!\n\nSing, dance, and learn with cute 3D cartoon friends in this animated nursery rhyme about {clean_t}.\n\n⏱️ Chapters:\n00:00 - Welcome & Sing-Along\n00:15 - Happy Verse Dance\n00:30 - Chorus Together\n00:45 - Goodbye & Sweet Dreams\n\n#nurseryrhymes #kidssongs #toddlerlearning #preschool",
             "hashtags": [f"#{clean_t.replace(' ', '').lower()}", "#nurseryrhymes", "#kidssongs", "#toddlerlearning", "#preschool", "#toddlerfun"],
-            "tags": [
-                clean_t.lower(),
-                f"{clean_t.lower()} song",
-                f"{clean_t.lower()} nursery rhyme",
-                "nursery rhymes",
-                "kids songs",
-                "toddler songs",
-                "preschool animation",
-                                                "learning for kids",
-                "sing along songs",
-                "baby cartoon 2026",
-            ]
+            "tags": f"{clean_t.lower()}, {clean_t.lower()} song, {clean_t.lower()} nursery rhyme, nursery rhymes, kids songs, toddler songs, preschool animation, learning for kids, baby cartoon 2026",
+            "caption": f"Sing and dance along with {clean_t}! 🎈 Learn, smile, and explore with our cute 3D cartoon friends! #kidssongs #nurseryrhymes #preschool",
         }
     else:
         topic_match = re.search(r"about: '([^']+)'", user_prompt)
