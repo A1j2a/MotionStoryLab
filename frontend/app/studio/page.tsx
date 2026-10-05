@@ -31,6 +31,7 @@ import {
  FileVideo,
  ListOrdered,
  Zap,
+ Download,
 } from "lucide-react";
 
 type PromptStatus = "NOT_COPIED" | "PROMPT_COPIED" | "VIDEO_UPLOADED" | "ORDER_CONFIRMED" | "FAILED";
@@ -201,6 +202,12 @@ export default function StudioPage() {
  });
  } else {
  setFinalVideoResult(null);
+ const isAllReady = scenesData.length > 0 && (scenesData as SceneWithStatus[]).every((s) => s.uploaded_file);
+ if (isAllReady && (readyData.audio_available || readyData.ready)) {
+ setSequenceConfirmed(true);
+ api.confirmSceneSequence(selectedProjectId, sequenceOrder).catch(() => {});
+ api.generateFinalVideoFromUploads(selectedProjectId).then((r) => setFinalVideoResult(r)).catch(() => {});
+ }
  }
 
  if (readyData.unresolved_count && readyData.unresolved_count > 0) {
@@ -608,10 +615,22 @@ export default function StudioPage() {
  <p className="text-xs text-red-600 mt-1">{scenes.filter(s => !s.uploaded_file).map(s => `Scene ${s.scene_number}`).join(", ")}</p>
  </div>
  )}
- <button disabled={!allUploaded || sequenceConfirmed} onClick={handleConfirmSequence}
- className={`flex items-center gap-2 px-6 py-3 rounded-xl font-semibold text-sm transition-all ${allUploaded && !sequenceConfirmed ? "bg-[#FF6B00] text-white hover:bg-[#EA580C] shadow-md shadow-orange-500/25" : sequenceConfirmed ? "bg-green-500 text-white cursor-default" : "bg-[#F5F5F7] text-[#86868B] cursor-not-allowed"}`}>
- {sequenceConfirmed ? <><CheckCircle2 className="w-4 h-4" />Sequence Confirmed </> : <><Check className="w-4 h-4" />Confirm Sequence</>}
- </button>
+ <div className="flex flex-wrap items-center gap-3">
+ <div className={`flex items-center gap-2 px-4 py-3 rounded-xl font-semibold text-sm ${allUploaded ? "bg-green-100 text-green-800 border border-green-300" : "bg-[#F5F5F7] text-[#86868B]"}`}>
+ {allUploaded ? <><CheckCircle2 className="w-4 h-4 text-green-600" />Sequence Auto-Confirmed</> : <><Clock className="w-4 h-4 text-[#86868B]" />Auto-confirms when all scenes ready</>}
+ </div>
+ {uploadedCount > 0 && selectedProjectId && (
+ <a
+ href={api.getDownloadSequenceZipUrl(selectedProjectId)}
+ download
+ className="flex items-center gap-2 px-5 py-3 rounded-xl font-semibold text-sm border border-cyan-300 bg-cyan-50 hover:bg-cyan-100 text-cyan-900 transition-all shadow-xs cursor-pointer"
+ title="Download all uploaded scene videos renamed in confirmed sequence order"
+ >
+ <Download className="w-4 h-4 text-cyan-600" />
+ <span>Download Formatted Scenes ({uploadedCount}) • ZIP</span>
+ </a>
+ )}
+ </div>
  </div>
  </div>
  )}
@@ -654,10 +673,19 @@ export default function StudioPage() {
  </div>
 
  {!finalVideoResult && (
- <button onClick={handleGenerateFinalVideo} disabled={assembling || (readiness != null && !readiness.ready)}
- className={`w-full flex items-center justify-center gap-3 py-4 rounded-2xl font-bold text-base transition-all ${assembling ? "bg-[#FF6B00]/70 text-white cursor-not-allowed" : readiness && !readiness.ready ? "bg-[#F5F5F7] text-[#86868B] cursor-not-allowed" : "bg-gradient-to-r from-[#FF6B00] to-[#EA580C] text-white shadow-lg shadow-orange-500/30 hover:shadow-orange-500/40 hover:-translate-y-0.5"}`}>
- {assembling ? <><Loader2 className="w-5 h-5 animate-spin" />Assembling Final Video… (may take a few minutes)</> : <><Zap className="w-5 h-5" />Generate Final Video</>}
- </button>
+ <div className="space-y-3">
+ {assembling ? (
+ <div className="w-full flex items-center justify-center gap-3 py-4 bg-emerald-50 border border-emerald-300 rounded-2xl font-bold text-base text-emerald-800 animate-pulse">
+ <Loader2 className="w-5 h-5 animate-spin text-emerald-600" />
+ <span>Auto-Assembling Final Video with FFmpeg…</span>
+ </div>
+ ) : (
+ <div className="w-full flex items-center justify-center gap-2 py-4 bg-slate-100 rounded-2xl font-semibold text-sm text-slate-500">
+ <Clock className="w-4 h-4 text-slate-400" />
+ <span>Auto-assembles automatically as soon as all scenes are ready</span>
+ </div>
+ )}
+ </div>
  )}
 
  {assembleError && (

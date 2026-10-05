@@ -720,6 +720,60 @@ def _probe_video_duration(path: str) -> Optional[float]:
         return None
 
 
+async def _auto_check_and_confirm_sequence(project_id: str, session: AsyncSession) -> bool:
+    """
+    Checks if all storyboard scenes for the project have uploaded videos.
+    If yes, automatically sets their sequential order (1..N) and prompt_status to ORDER_CONFIRMED.
+    Returns True if all scenes are ready.
+    """
+    result = await session.execute(
+        select(Scene).where(Scene.project_id == project_id).order_by(Scene.scene_number.asc())
+    )
+    scenes = result.scalars().all()
+    if not scenes:
+        return False
+
+    project_dir = Path(str(settings.resolved_project_dir)) / project_id / "uploaded_scenes"
+
+    all_ready = True
+    for s in scenes:
+        has_file = False
+        if s.uploaded_file and Path(s.uploaded_file).exists():
+            has_file = True
+        elif project_dir.exists():
+            for cand in [
+                project_dir / f"scene_{s.scene_number:03d}.mp4",
+                project_dir / f"scene_{s.scene_number:02d}.mp4",
+                project_dir / f"scene_{s.scene_number}.mp4",
+                project_dir / f"scene_{s.scene_number:03d}.mov",
+                project_dir / f"scene_{s.scene_number:02d}.mov",
+                project_dir / f"scene_{s.scene_number}.mov",
+                project_dir / f"scene_{s.scene_number:03d}.webm",
+                project_dir / f"scene_{s.scene_number:02d}.webm",
+                project_dir / f"scene_{s.scene_number}.webm",
+            ]:
+                if cand.exists():
+                    s.uploaded_file = str(cand)
+                    try:
+                        s.uploaded_duration = _probe_video_duration(str(cand))
+                    except Exception:
+                        pass
+                    has_file = True
+                    break
+        if not has_file:
+            all_ready = False
+            break
+
+    if all_ready:
+        for idx, s in enumerate(scenes, start=1):
+            s.scene_order = s.scene_order if s.scene_order is not None else idx
+            s.prompt_status = "ORDER_CONFIRMED"
+        await session.commit()
+        return True
+
+    return False
+
+
 @router.post("/{project_id}/scenes/{scene_id}/upload-video", response_model=Dict[str, Any])
 async def upload_scene_video(
     project_id: str,
@@ -782,6 +836,8 @@ async def upload_scene_video(
     await scene_repo.update(scene)
     await session.commit()
 
+    all_ready = await _auto_check_and_confirm_sequence(project_id, session)
+
     return {
         "scene_id": scene_id,
         "scene_number": scene.scene_number,
@@ -791,6 +847,9 @@ async def upload_scene_video(
         "uploaded_duration": duration,
         "planned_duration": planned,
         "duration_warning": duration_warning,
+        "all_scenes_ready": all_ready,
+        "sequence_confirmed": all_ready,
+        "download_zip_url": f"/api/v1/projects/{project_id}/scenes/download-sequence-zip" if all_ready else None,
     }
 
 
@@ -892,11 +951,15 @@ async def batch_upload_scenes(
             })
 
     await session.commit()
+    all_ready = await _auto_check_and_confirm_sequence(project_id, session)
     return {
         "results": results,
         "unresolved": unresolved,
         "total_uploaded": sum(1 for r in results if r["status"] == "UPLOADED"),
         "needs_assignment": len(unresolved),
+        "all_scenes_ready": all_ready,
+        "sequence_confirmed": all_ready,
+        "download_zip_url": f"/api/v1/projects/{project_id}/scenes/download-sequence-zip" if all_ready else None,
     }
 
 
@@ -1039,10 +1102,14 @@ async def auto_assign_smart(
         })
 
     await session.commit()
+    all_ready = await _auto_check_and_confirm_sequence(project_id, session)
     return {
         "status": "success",
         "assigned_count": assigned_count,
         "details": assigned_details,
+        "all_scenes_ready": all_ready,
+        "sequence_confirmed": all_ready,
+        "download_zip_url": f"/api/v1/projects/{project_id}/scenes/download-sequence-zip" if all_ready else None,
         "message": f"Successfully matched and assigned {assigned_count} scenes using AI & Prompt analysis.",
     }
 
@@ -1090,8 +1157,16 @@ async def assign_unresolved_video(
     scene_repo = SceneRepository(session)
     await scene_repo.update(scene)
     await session.commit()
+    all_ready = await _auto_check_and_confirm_sequence(project_id, session)
 
-    return {"scene_number": scene_number, "status": "ASSIGNED", "duration": duration}
+    return {
+        "scene_number": scene_number,
+        "status": "ASSIGNED",
+        "duration": duration,
+        "all_scenes_ready": all_ready,
+        "sequence_confirmed": all_ready,
+        "download_zip_url": f"/api/v1/projects/{project_id}/scenes/download-sequence-zip" if all_ready else None,
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1126,8 +1201,98 @@ async def confirm_scene_sequence(
     return {
         "confirmed": True,
         "sequence": payload.scene_order,
+        "download_zip_url": f"/api/v1/projects/{project_id}/scenes/download-sequence-zip",
         "message": f"Scene sequence confirmed for {len(payload.scene_order)} scenes.",
     }
+
+
+@router.get("/{project_id}/scenes/download-sequence-zip")
+@router.head("/{project_id}/scenes/download-sequence-zip")
+async def download_formatted_scenes_zip(
+    project_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """
+    Packages all uploaded scene videos in confirmed chronological sequence into a single ZIP archive.
+    Files inside the ZIP are neatly renamed (scene_01.mp4, scene_02.mp4, ...) according to sequence order.
+    Includes a sequence_manifest.txt with scene details.
+    """
+    import zipfile
+    project_repo = ProjectRepository(session)
+    project = await project_repo.get(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    result = await session.execute(
+        select(Scene).where(Scene.project_id == project_id).order_by(
+            Scene.scene_order.asc(), Scene.scene_number.asc()
+        )
+    )
+    scenes = result.scalars().all()
+    if not scenes:
+        raise HTTPException(status_code=400, detail="No scenes found for this project")
+
+    project_dir = Path(str(settings.resolved_project_dir)) / project_id
+    uploaded_scenes_dir = project_dir / "uploaded_scenes"
+
+    # Auto-heal uploaded file paths if missing in DB but present on disk
+    if uploaded_scenes_dir.exists():
+        for s in scenes:
+            if not (s.uploaded_file and Path(s.uploaded_file).exists()):
+                for cand in [
+                    uploaded_scenes_dir / f"scene_{s.scene_number:03d}.mp4",
+                    uploaded_scenes_dir / f"scene_{s.scene_number:02d}.mp4",
+                    uploaded_scenes_dir / f"scene_{s.scene_number}.mp4",
+                    uploaded_scenes_dir / f"scene_{s.scene_number:03d}.mov",
+                    uploaded_scenes_dir / f"scene_{s.scene_number:02d}.mov",
+                    uploaded_scenes_dir / f"scene_{s.scene_number}.mov",
+                    uploaded_scenes_dir / f"scene_{s.scene_number:03d}.webm",
+                    uploaded_scenes_dir / f"scene_{s.scene_number:02d}.webm",
+                ]:
+                    if cand.exists():
+                        s.uploaded_file = str(cand)
+                        break
+
+    valid_scenes = [s for s in scenes if s.uploaded_file and Path(s.uploaded_file).exists()]
+    if not valid_scenes:
+        raise HTTPException(
+            status_code=400,
+            detail="No uploaded scene videos found to package into ZIP. Please upload scene videos first."
+        )
+
+    output_dir = project_dir / "output"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    clean_title = re.sub(r"[^\w\s-]", "", project.title or project.topic or "scenes").strip().replace(" ", "_")
+    zip_path = output_dir / f"formatted_scenes_{project_id[:8]}.zip"
+
+    manifest_lines = [
+        "==================================================",
+        f" Project: {project.title or project.topic or project_id}",
+        f" Total Formatted Scenes: {len(valid_scenes)}",
+        f" Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}",
+        "==================================================",
+        "",
+        "CHRONOLOGICAL SCENE SEQUENCE:",
+    ]
+
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for idx, s in enumerate(valid_scenes, start=1):
+            src_file = Path(s.uploaded_file)
+            ext = src_file.suffix or ".mp4"
+            arc_name = f"scene_{idx:02d}{ext}"
+            zf.write(src_file, arcname=arc_name)
+            manifest_lines.append(
+                f"{idx:02d}. {arc_name} (Scene #{s.scene_number:02d}, Duration: {s.uploaded_duration or 0:.1f}s) - {s.lyrics or s.video_prompt or 'N/A'}"
+            )
+
+        zf.writestr("sequence_manifest.txt", "\n".join(manifest_lines))
+
+    return FileResponse(
+        path=str(zip_path),
+        media_type="application/zip",
+        filename=f"formatted_scenes_{clean_title}_{project_id[:8]}.zip",
+        content_disposition_type="attachment",
+    )
 
 
 @router.get("/{project_id}/assembly/readiness", response_model=Dict[str, Any])
@@ -1255,8 +1420,11 @@ async def check_assembly_readiness(
             "prompt_status": s.prompt_status,
         })
 
-    confirmed_count = sum(1 for s in scenes if s.prompt_status == "ORDER_CONFIRMED")
     ready = (total > 0 and len(missing) == 0 and audio_ok)
+    if ready:
+        await _auto_check_and_confirm_sequence(project_id, session)
+
+    confirmed_count = sum(1 for s in scenes if s.prompt_status == "ORDER_CONFIRMED")
     thumb_prompt = meta.get("thumbnail_prompt") or meta.get("manual_seo", {}).get("thumbnail_prompt")
     if not thumb_prompt:
         prompt_file = project_dir / "thumbnail_prompt.txt"
@@ -1275,6 +1443,7 @@ async def check_assembly_readiness(
         "audio_file": audio_file,
         "srt_available": srt_ok,
         "sequence_confirmed": (confirmed_count == total and total > 0) or ready,
+        "download_zip_url": f"/api/v1/projects/{project_id}/scenes/download-sequence-zip" if len(uploaded) > 0 else None,
         "topic": project.topic,
         "title": project.title,
         "final_video_exists": bool(final_video_file),

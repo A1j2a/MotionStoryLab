@@ -158,6 +158,29 @@ export function ManualWorkflowView({ initialProjectId, onProjectChange }: Manual
  const [assembling, setAssembling] = useState<boolean>(false);
  const [finalVideoResult, setFinalVideoResult] = useState<{ status: string; final_video: string; duration: number } | null>(null);
  const [assembleError, setAssembleError] = useState<string | null>(null);
+ const autoAssemblingRef = useRef<boolean>(false);
+
+ // Auto Assembly Trigger (FFmpeg Final Video)
+ const triggerAutoAssembly = useCallback(async (projectId: string) => {
+  if (autoAssemblingRef.current) return;
+  autoAssemblingRef.current = true;
+  setAssembling(true);
+  setAssembleError(null);
+  try {
+   const result = await api.generateFinalVideoFromUploads(projectId);
+   setFinalVideoResult(result);
+   setThumbTimestamp(Date.now());
+   setVideoTimestamp(Date.now());
+   setVideoLoadError(false);
+   const readyData = await api.checkAssemblyReadiness(projectId).catch(() => null);
+   if (readyData) setReadiness(readyData);
+  } catch (err: any) {
+   setAssembleError(err?.message || "Final video assembly failed.");
+  } finally {
+   setAssembling(false);
+   autoAssemblingRef.current = false;
+  }
+ }, []);
 
  // Fetch Projects List
  const loadProjects = useCallback(async () => {
@@ -237,6 +260,12 @@ export function ManualWorkflowView({ initialProjectId, onProjectChange }: Manual
  });
  } else {
  setFinalVideoResult(null);
+  const typedScenes = (scenesList || []) as SceneWithStatus[];
+  const isNowAllReady = typedScenes.length > 0 && typedScenes.every((s) => s.uploaded_file);
+  if (isNowAllReady && (readyData.audio_available || readyData.ready)) {
+   setSequenceConfirmed(true);
+   triggerAutoAssembly(projId);
+  }
  }
 
  // If there are unresolved clips waiting in project folder, auto-fetch AI matches
@@ -457,6 +486,13 @@ export function ManualWorkflowView({ initialProjectId, onProjectChange }: Manual
  setScenes(updatedScenes as SceneWithStatus[]);
  setCopyStatus(statusData);
  if (readyData) setReadiness(readyData);
+  const typedScenes = updatedScenes as SceneWithStatus[];
+  const isNowAllReady = typedScenes.length > 0 && typedScenes.every((s) => s.uploaded_file);
+  if (isNowAllReady) {
+   setSequenceConfirmed(true);
+   api.confirmSceneSequence(selectedProjectId, typedScenes.map((s) => s.scene_number)).catch(() => {});
+   triggerAutoAssembly(selectedProjectId);
+  }
  } catch (err: any) {
  alert("Upload failed: " + (err?.message || err));
  } finally {
@@ -479,6 +515,13 @@ export function ManualWorkflowView({ initialProjectId, onProjectChange }: Manual
  setScenes(updatedScenes as SceneWithStatus[]);
  setCopyStatus(statusData);
  if (readyData) setReadiness(readyData);
+  const typedScenes = updatedScenes as SceneWithStatus[];
+  const isNowAllReady = typedScenes.length > 0 && typedScenes.every((s) => s.uploaded_file);
+  if (isNowAllReady) {
+   setSequenceConfirmed(true);
+   api.confirmSceneSequence(selectedProjectId, typedScenes.map((s) => s.scene_number)).catch(() => {});
+   triggerAutoAssembly(selectedProjectId);
+  }
  } catch (err: any) {
  alert("Assignment failed: " + (err?.message || err));
  }
@@ -541,6 +584,13 @@ export function ManualWorkflowView({ initialProjectId, onProjectChange }: Manual
  setScenes(updatedScenes as SceneWithStatus[]);
  setCopyStatus(statusData);
  if (readyData) setReadiness(readyData);
+  const typedScenes = updatedScenes as SceneWithStatus[];
+  const isNowAllReady = typedScenes.length > 0 && typedScenes.every((s) => s.uploaded_file);
+  if (isNowAllReady) {
+   setSequenceConfirmed(true);
+   api.confirmSceneSequence(selectedProjectId, typedScenes.map((s) => s.scene_number)).catch(() => {});
+   triggerAutoAssembly(selectedProjectId);
+  }
  } catch (err: any) {
  alert("Smart AI assignment failed: " + (err?.message || err));
  } finally {
@@ -591,21 +641,7 @@ export function ManualWorkflowView({ initialProjectId, onProjectChange }: Manual
 
  const handleGenerateFinalVideo = async () => {
  if (!selectedProjectId) return;
- setAssembling(true);
- setAssembleError(null);
- try {
- const result = await api.generateFinalVideoFromUploads(selectedProjectId);
- setFinalVideoResult(result);
- setThumbTimestamp(Date.now());
- setVideoTimestamp(Date.now());
- setVideoLoadError(false);
- const readyData = await api.checkAssemblyReadiness(selectedProjectId).catch(() => null);
- if (readyData) setReadiness(readyData);
- } catch (err: any) {
- setAssembleError(err?.message || "Final video assembly failed.");
- } finally {
- setAssembling(false);
- }
+ await triggerAutoAssembly(selectedProjectId);
  };
 
  // Computations
@@ -1771,25 +1807,60 @@ export function ManualWorkflowView({ initialProjectId, onProjectChange }: Manual
  </p>
  </div>
 
- <button
- onClick={handleConfirmSequence}
- disabled={confirmingSequence || scenes.length === 0}
- className={`px-5 py-2.5 rounded-2xl text-xs font-bold transition-all shadow-md flex items-center gap-2 ${
- sequenceConfirmed
- ? "bg-emerald-600 text-white shadow-emerald-500/20"
- : "bg-cyan-600 hover:bg-cyan-700 text-white shadow-cyan-500/20"
+ <div className="flex flex-wrap items-center gap-2">
+ {uploadedCount > 0 && selectedProjectId && (
+ <a
+ href={api.getDownloadSequenceZipUrl(selectedProjectId)}
+ download
+ className="px-4 py-2.5 rounded-2xl text-xs font-bold transition-all border border-cyan-200 bg-cyan-50 hover:bg-cyan-100 text-cyan-800 shadow-xs flex items-center gap-2 cursor-pointer"
+ title="Download all formatted and ordered scenes as a single ZIP archive"
+ >
+ <Download className="w-4 h-4 text-cyan-600" />
+ <span>Download Formatted ZIP ({uploadedCount})</span>
+ </a>
+ )}
+
+ <div
+ className={`px-4 py-2.5 rounded-2xl text-xs font-bold flex items-center gap-2 ${
+ allUploaded
+ ? "bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-xs"
+ : "bg-slate-100 text-slate-500 border border-slate-200"
  }`}
  >
- {confirmingSequence ? (
- <Loader2 className="w-4 h-4 animate-spin" />
- ) : sequenceConfirmed ? (
- <CheckCircle2 className="w-4 h-4" />
+ {allUploaded ? (
+ <>
+ <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+ <span>Sequence Auto-Confirmed</span>
+ </>
  ) : (
- <Check className="w-4 h-4" />
+ <>
+ <Clock className="w-4 h-4 text-slate-400" />
+ <span>Auto-confirms when all scenes ready ({uploadedCount}/{totalScenes})</span>
+ </>
  )}
- <span>{sequenceConfirmed ? "Sequence Confirmed" : "Confirm Scene Sequence"}</span>
- </button>
  </div>
+ </div>
+ </div>
+
+ {/* Formatted Sequence Ready Alert & Direct Download */}
+ {sequenceConfirmed && uploadedCount > 0 && selectedProjectId && (
+ <div className="bg-gradient-to-r from-cyan-50 to-emerald-50 border border-cyan-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-cyan-950 shadow-xs">
+ <div className="flex items-center gap-2.5">
+ <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+ <span>
+ <strong>Sequence Formatted & Confirmed:</strong> All {uploadedCount} uploaded scenes are arranged in order (<code>scene_01.mp4</code>, <code>scene_02.mp4</code>...). You can download the packaged ZIP anytime.
+ </span>
+ </div>
+ <a
+ href={api.getDownloadSequenceZipUrl(selectedProjectId)}
+ download
+ className="px-4 py-2 bg-gradient-to-r from-cyan-600 to-emerald-600 hover:from-cyan-700 hover:to-emerald-700 text-white rounded-xl font-bold flex items-center gap-1.5 shadow-sm transition-all whitespace-nowrap self-start sm:self-auto cursor-pointer"
+ >
+ <Download className="w-3.5 h-3.5" />
+ <span>Download Formatted ZIP</span>
+ </a>
+ </div>
+ )}
 
  {/* Sequence Badges */}
  <div className="flex flex-wrap items-center gap-2 p-3 bg-[#FAFAFC] border border-[#E5E5EA] rounded-2xl">
@@ -1851,19 +1922,32 @@ export function ManualWorkflowView({ initialProjectId, onProjectChange }: Manual
  >
  {checkingReadiness ? "Checking…" : "Check Readiness"}
  </button>
+ {assembling ? (
+ <div className="px-5 py-2.5 bg-emerald-50 border border-emerald-300 text-emerald-800 rounded-2xl text-xs font-bold flex items-center gap-2 animate-pulse">
+ <Loader2 className="w-4 h-4 animate-spin text-emerald-600" />
+ <span>Auto-Assembling Video with FFmpeg…</span>
+ </div>
+ ) : finalVideoResult ? (
+ <div className="flex items-center gap-2">
+ <div className="px-3.5 py-2 rounded-2xl text-xs font-bold bg-emerald-100 text-emerald-800 flex items-center gap-1.5">
+ <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+ <span>Auto-Assembled</span>
+ </div>
  <button
  onClick={handleGenerateFinalVideo}
- disabled={assembling || !selectedProjectId || !allUploaded}
- title={!allUploaded ? `Cannot assemble: ${totalScenes - uploadedCount} scene(s) still missing video clips` : "Generate final video"}
- className={`px-6 py-2.5 rounded-2xl text-xs font-black transition-all flex items-center gap-2 ${
- allUploaded && selectedProjectId
- ? "bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 text-white shadow-lg shadow-emerald-500/25 cursor-pointer"
- : "bg-slate-200 text-slate-400 cursor-not-allowed opacity-60"
- }`}
+ className="px-3 py-2 border border-[#E5E5EA] bg-[#FAFAFC] hover:bg-[#F5F5F7] rounded-xl text-xs font-bold text-[#1D1D1F] transition-all flex items-center gap-1.5 cursor-pointer"
+ title="Re-run assembly if you made changes"
  >
- {assembling ? <Loader2 className="w-4 h-4 animate-spin" /> : <Film className="w-4 h-4" />}
- <span>{assembling ? "Assembling Final Video with FFmpeg…" : " GENERATE FINAL VIDEO"}</span>
+ <RefreshCw className="w-3.5 h-3.5 text-slate-500" />
+ <span>Re-assemble</span>
  </button>
+ </div>
+ ) : (
+ <div className="px-3.5 py-2 rounded-2xl text-xs font-medium bg-slate-100 text-slate-400 flex items-center gap-1.5">
+ <Clock className="w-3.5 h-3.5 text-slate-400" />
+ <span>Auto-assembles when all scenes ready ({uploadedCount}/{totalScenes})</span>
+ </div>
+ )}
  </div>
  </div>
 
@@ -1878,6 +1962,16 @@ export function ManualWorkflowView({ initialProjectId, onProjectChange }: Manual
  Upload or assign video files to all scene slots above before assembling the final video.
  Missing: Scenes {scenes.filter(s => !s.uploaded_file).map(s => String(s.scene_number).padStart(2, "0")).join(", ")}
  </p>
+ </div>
+ )}
+
+ {assembling && (
+ <div className="p-4 bg-gradient-to-r from-emerald-50 via-teal-50 to-green-50 border-2 border-emerald-400 rounded-2xl flex items-center gap-3.5 shadow-sm animate-pulse">
+ <Loader2 className="w-6 h-6 text-emerald-600 animate-spin flex-shrink-0" />
+ <div>
+ <h4 className="text-sm font-black text-emerald-950">Auto-Assembling Final Video with FFmpeg...</h4>
+ <p className="text-xs text-emerald-700">All scenes are ready! Stitching clips in sequence + mixing master song soundtrack + synchronizing lyric subtitles.</p>
+ </div>
  </div>
  )}
 

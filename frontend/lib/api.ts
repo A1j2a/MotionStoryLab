@@ -602,5 +602,8 @@ export const api = {
 
   getFinalVideoUrl: (projectId: string) =>
     `${API_BASE}/api/v1/projects/${projectId}/assembly/final-video`,
+
+  getDownloadSequenceZipUrl: (projectId: string) =>
+    `${API_BASE}/api/v1/projects/${projectId}/scenes/download-sequence-zip`,
 };
 
