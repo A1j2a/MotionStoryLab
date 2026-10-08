@@ -5,8 +5,8 @@
 
 set -euo pipefail
 
-# Ensure standard binary paths are in PATH (Homebrew, NVM, FNM, Volta)
-export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:$PATH"
+# Ensure standard binary paths are in PATH (Local, Hermes, Homebrew, NVM, FNM, Volta)
+export PATH="$HOME/.local/bin:$HOME/.hermes/node/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:$PATH"
 if [ -d "$HOME/.nvm/versions/node" ]; then
     for NVM_NODE_DIR in "$HOME"/.nvm/versions/node/*; do
         if [ -d "${NVM_NODE_DIR}/bin" ]; then
@@ -154,13 +154,10 @@ if [ -f "${SCRIPT_DIR}/frontend/package.json" ]; then
     if lsof -Pi :${FRONTEND_PORT} -sTCP:LISTEN -t >/dev/null 2>&1; then
         echo "  ✓ Frontend already running on port ${FRONTEND_PORT}"
     else
-        ORIG_DIR="$(pwd)"
-        cd "${SCRIPT_DIR}/frontend"
-        nohup npx next dev --turbo -H 127.0.0.1 -p "${FRONTEND_PORT}" > "${SCRIPT_DIR}/logs/frontend.log" 2>&1 &
+        nohup "${PYTHON_BIN}" "${SCRIPT_DIR}/services/frontend_service.py" > "${SCRIPT_DIR}/logs/frontend.log" 2>&1 &
         FRONTEND_PID=$!
         disown ${FRONTEND_PID} 2>/dev/null || true
         echo ${FRONTEND_PID} > "${PID_DIR}/frontend.pid"
-        cd "${ORIG_DIR}"
         sleep 3
         echo "  ✓ Frontend started in dev mode with hot reload (PID: ${FRONTEND_PID})"
     fi
