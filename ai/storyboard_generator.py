@@ -15,9 +15,14 @@ def _compose_video_prompt(
     lyrics: str,
     cam: Dict[str, Any],
     scene_num: int,
+    topic: str = "",
+    char_species: str = "",
+    char_colors: str = "",
     additional_chars: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
-    """Generates high-fidelity 3D preschool video generation prompts matching Pixar/CoComelon benchmark."""
+    """Generates high-fidelity 3D preschool video generation prompts matching Pixar/CoComelon benchmark.
+    Character appearance, clothing and topic are strictly enforced so AI generators always
+    render the correct character with the right costume themed around the song topic."""
     clean_app = char_appearance or "cute animated toddler character with large round expressive eyes, rosy cheeks, and joyful warm smile"
     clean_cloth = char_clothing or "vibrant preschool dungarees, colorful t-shirt, and sneakers"
     clean_env = env_name or "vibrant sunlit storybook farm with rustic wooden barn, blooming flowers, and lush green meadows"
@@ -33,8 +38,22 @@ def _compose_video_prompt(
         extra_names = ", ".join([c.get("name", "friend") for c in additional_chars[:2]])
         extra_chars_str = f" alongside {extra_names} joining the cheerful choreography,"
 
+    # Build a rich character identity block so the AI generator knows exactly what the character looks like
+    char_identity_parts = [f"{char_name}"]
+    if char_species:
+        char_identity_parts.append(f"({char_species})")
+    char_identity_parts.append(f"— {clean_app}")
+    if clean_cloth:
+        char_identity_parts.append(f"wearing {clean_cloth}")
+    if char_colors:
+        char_identity_parts.append(f"in palette {char_colors}")
+    char_identity = ", ".join(char_identity_parts)
+
+    topic_tag = f" themed around '{topic}'" if topic else ""
+
     return (
-        f"Original 3D Stylized Pixar and CoComelon CGI Animation: {char_name}, {clean_app}, wearing {clean_cloth}{extra_chars_str}. "
+        f"Original 3D Stylized Pixar and CoComelon CGI Animation: {char_identity}{extra_chars_str}. "
+        f"Song Topic{topic_tag}. "
         f"Visual Action & Narrative: {char_name} is {action_view}, directly acting out and visually narrating the lyrics: '{lyrics}'. "
         f"Environment & Scene: {clean_env} under bright blue sunny skies with warm volumetric sunbeams and vibrant saturated preschool palette. "
         f"Cinematography: {cam_move} {cam_shot} from {cam_angle}, {lighting}, shallow depth of field bokeh, "
@@ -78,6 +97,7 @@ def generate_storyboard(
         characters=characters,
         environments=environments,
         target_scene_duration=target_scene_duration,
+        topic=topic,
     )
 
     logger.info(
@@ -93,7 +113,10 @@ def generate_storyboard(
     ]
 
     all_chars_desc = ", ".join([
-        f"{c.get('name', 'Character')} ({c.get('appearance', 'cute toddler')}, wearing {c.get('clothing', 'preschool outfit')})"
+        f"{c.get('name', 'Character')} "
+        f"({c.get('species', c.get('type', 'character'))}) — "
+        f"{c.get('appearance', 'cute toddler')}, wearing {c.get('clothing', 'preschool outfit')}"
+        + (f", colors: {', '.join(c['colors']) if isinstance(c.get('colors'), list) else c.get('colors', '')}" if c.get('colors') else "")
         for c in characters[:3]
     ]) if characters else f"{main_char_name} — {main_char_app}, wearing {main_char_clothing}"
 
@@ -105,10 +128,15 @@ Environment / Setting: {main_env_name}
 I have {len(scenes)} scenes already planned at {target_scene_duration}s each.
 For EACH scene below, write ONE rich, production-ready 'video_prompt' for AI Video Generators (Google Flow, Luma, Kling, Wan 2.1, Runway, Sora).
 
+CRITICAL CHARACTER RULES:
+- The character(s) MUST appear exactly as described: their appearance, clothing, colors, and species are NON-NEGOTIABLE.
+- Never change the character's costume, colors, or identity between scenes.
+- The song topic is '{topic}' — every scene prompt MUST visually connect to this topic.
+
 VISUAL BENCHMARK (Strictly Follow Reference Quality):
 - Style: Stylized 3D Pixar & CoComelon CGI Animation, vibrant saturated preschool candy palette, 8K Unreal Engine 5 render.
 - Character Aesthetics: Smooth porcelain skin with soft subsurface scattering, large round expressive glossy cartoon eyes, rosy cheeks, warm joyful facial expressions.
-- Acting & Lyrics Alignment: The visual choreography MUST strictly act out the specific lyric line for that scene. Characters must physically perform the actions, gestures, and story mentioned in the lyrics (e.g., dancing on a sunlit farm with grandpa, clapping, jumping over flowers, pointing at clouds).
+- Acting & Lyrics Alignment: The visual choreography MUST strictly act out the specific lyric line for that scene. Characters must physically perform the actions, gestures, and story mentioned in the lyrics.
 - Camera & Lighting: Cinematic camera motion (tracking, slow push-in, gentle crane), soft 3-point studio lighting with warm golden sunbeams and shallow depth of field bokeh.
 - Length: 2 to 4 rich descriptive sentences per prompt.
 
@@ -117,7 +145,6 @@ Scenes to enrich:
 
 Return a JSON object: {{"prompts": [{{"scene_number": 1, "video_prompt": "..."}}]}}
 IMPORTANT: Return EXACTLY {len(scenes)} prompts, one per scene. Do NOT add or remove scenes."""
-
     try:
         res = provider.generate_json(
             enrich_prompt,
@@ -146,6 +173,7 @@ def build_procedural_storyboard(
     characters: List[Dict[str, Any]],
     environments: List[Dict[str, Any]],
     target_scene_duration: float = 8.0,
+    topic: str = "",
 ) -> List[Dict[str, Any]]:
     """
     Builds a deterministic scene timeline where:
@@ -165,6 +193,9 @@ def build_procedural_storyboard(
     char_name = char_obj.get("name", "Hero")
     char_app = char_obj.get("appearance", "cute toddler with cheerful smile and bright curious eyes")
     char_cloth = char_obj.get("clothing", "colorful preschool outfit")
+    char_species = char_obj.get("species") or char_obj.get("type", "")
+    raw_colors = char_obj.get("colors", [])
+    char_colors = ", ".join(raw_colors) if isinstance(raw_colors, list) else str(raw_colors or "")
     extra_chars = characters[1:] if len(characters) > 1 else None
 
     env_obj = environments[0] if environments else {"id": "env_01", "name": "Sunny Storybook World"}
@@ -209,7 +240,7 @@ def build_procedural_storyboard(
                     line = lt.get("line", "").strip()
                     if line:
                         overlapping_lines.append(line)
-        lyrics_line = " ".join(overlapping_lines) if overlapping_lines else f"Scene {idx}"
+        lyrics_line = " ".join(overlapping_lines) if overlapping_lines else ""
 
         cam = camera_presets[(idx - 1) % len(camera_presets)]
         action_desc = action_presets[(idx - 1) % len(action_presets)]
@@ -223,6 +254,9 @@ def build_procedural_storyboard(
             lyrics=lyrics_line,
             cam=cam,
             scene_num=idx,
+            topic=topic,
+            char_species=char_species,
+            char_colors=char_colors,
             additional_chars=extra_chars,
         )
 

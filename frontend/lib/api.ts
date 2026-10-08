@@ -603,6 +603,39 @@ export const api = {
   getFinalVideoUrl: (projectId: string) =>
     `${API_BASE}/api/v1/projects/${projectId}/assembly/final-video`,
 
+  getSceneVideoUrl: (projectId: string, sceneId: string) =>
+    `${API_BASE}/api/v1/projects/${projectId}/scenes/${sceneId}/video`,
+
+  aiReassignSceneVideo: (
+    projectId: string,
+    sceneId: string,
+    payload?: { apply_match?: boolean; candidate_tmp_path?: string }
+  ) =>
+    request<{
+      status: string;
+      scene_id: string;
+      scene_number: number;
+      assigned_file?: string | null;
+      duration?: number | null;
+      confidence?: number;
+      match_reason?: string;
+      match_source?: string;
+      reassigned: boolean;
+      all_scenes_ready?: boolean;
+      candidates?: Array<{
+        filename: string;
+        tmp_path: string;
+        confidence: number;
+        reason: string;
+        source: string;
+        is_current: boolean;
+      }>;
+      scene: any;
+    }>(`/api/v1/projects/${projectId}/scenes/${sceneId}/ai-reassign`, {
+      method: "POST",
+      body: JSON.stringify(payload || { apply_match: true }),
+    }),
+
   getDownloadSequenceZipUrl: (projectId: string) =>
     `${API_BASE}/api/v1/projects/${projectId}/scenes/download-sequence-zip`,
 };

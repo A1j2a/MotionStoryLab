@@ -38,6 +38,7 @@ import {
 } from "lucide-react";
 import { InteractiveEngineFlow } from "@/components/InteractiveEngineFlow";
 import YouTubeStudioModal from "@/components/YouTubeStudioModal";
+import SceneVideoModal from "@/components/SceneVideoModal";
 
 interface ManualWorkflowViewProps {
  initialProjectId?: string;
@@ -146,6 +147,7 @@ export function ManualWorkflowView({ initialProjectId, onProjectChange }: Manual
  const [aiMatching, setAiMatching] = useState<boolean>(false);
  const [autoAssigning, setAutoAssigning] = useState<boolean>(false);
  const videoFileInputRef = useRef<HTMLInputElement | null>(null);
+ const [selectedSlotScene, setSelectedSlotScene] = useState<SceneWithStatus | null>(null);
 
  // Step 13-14: Sequence Confirmation
  const [sequenceOrder, setSequenceOrder] = useState<number[]>([]);
@@ -1488,8 +1490,9 @@ export function ManualWorkflowView({ initialProjectId, onProjectChange }: Manual
  return (
  <div
  key={s.id}
- title={hasFile ? `Scene ${s.scene_number}: Assigned (${fileName} — ${dur.toFixed(1)}s)` : `Scene ${s.scene_number}: Vacant — upload or assign video clip`}
- className={`p-2.5 rounded-xl text-center flex flex-col items-center justify-between gap-1.5 border-2 transition-all min-h-[76px] ${
+ onClick={() => setSelectedSlotScene(s)}
+					title={hasFile ? `Scene ${s.scene_number}: Assigned (${fileName} — ${dur.toFixed(1)}s)` : `Scene ${s.scene_number}: Vacant — upload or assign video clip`}
+ className={`p-2.5 rounded-xl text-center flex flex-col items-center justify-between gap-1.5 border-2 transition-all min-h-[76px] cursor-pointer hover:shadow-md hover:scale-[1.02] active:scale-95 group ${
  hasFile
  ? "bg-white border-emerald-500 text-emerald-950 shadow-xs"
  : "bg-amber-50/60 border-dashed border-amber-400 text-amber-900"
@@ -2135,6 +2138,19 @@ export function ManualWorkflowView({ initialProjectId, onProjectChange }: Manual
  videoUrl={`${API_BASE}/api/v1/projects/${selectedProjectId}/assembly/final-video`}
  />
  )}
+
+      {selectedProjectId && (
+        <SceneVideoModal
+          isOpen={!!selectedSlotScene}
+          onClose={() => setSelectedSlotScene(null)}
+          projectId={selectedProjectId}
+          scene={selectedSlotScene}
+          onSceneUpdated={(updatedScene) => {
+            setScenes((prev) => prev.map((s) => s.id === updatedScene.id ? { ...s, ...updatedScene } : s));
+            setSelectedSlotScene((prev) => prev && prev.id === updatedScene.id ? { ...prev, ...updatedScene } : prev);
+          }}
+        />
+      )}
  </div>
  );
 }

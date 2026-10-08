@@ -267,9 +267,30 @@ def synthesize_vocals(lyrics_lines: List[str], output_wav: str, duration_sec: fl
 
 def generate_subtitles_srt(scenes: List[Dict[str, Any]], output_srt: str, total_duration_sec: float = 60.0) -> str:
     """
-    Generates synchronized .srt subtitles covering the full requested video duration.
+    Generates synchronized .srt subtitles containing ONLY actual song lyric lines.
+    Scenes without real lyrics are skipped so the SRT stays clean for video editing imports.
+    Extra text like dialogue cues, placeholders, or internal notes is never written.
     """
     os.makedirs(os.path.dirname(os.path.abspath(output_srt)), exist_ok=True)
+
+    # Patterns that are NOT real lyrics — skip these
+    _SKIP_PATTERNS = (
+        "musical adventure scene",
+        "instrumental animation",
+        "scene ",
+        "singing our happy",
+        "animation cue",
+    )
+
+    def _is_real_lyric(text: str) -> bool:
+        """Return True only if text is an actual song lyric line, not a placeholder."""
+        if not text or not text.strip():
+            return False
+        low = text.strip().lower()
+        for pat in _SKIP_PATTERNS:
+            if low.startswith(pat):
+                return False
+        return True
 
     def fmt_time(seconds: float) -> str:
         millis = int((seconds - int(seconds)) * 1000)
@@ -280,32 +301,42 @@ def generate_subtitles_srt(scenes: List[Dict[str, Any]], output_srt: str, total_
 
     srt_entries = []
     if not scenes:
-        scenes = [{"duration": 15.0, "lyrics": "Singing our happy nursery song today!"}]
+        scenes = []
 
-    # Check if exact start/end timestamps are provided
-    has_timestamps = any(("start" in sc and "end" in sc) or ("start_time" in sc and "end_time" in sc) for sc in scenes)
+    # Check if exact start/end timestamps are provided (from audio analysis)
+    has_timestamps = any(
+        ("start" in sc and "end" in sc) or ("start_time" in sc and "end_time" in sc)
+        for sc in scenes
+    )
+
+    entry_idx = 1
     if has_timestamps:
-        for idx, sc in enumerate(scenes, start=1):
+        for sc in scenes:
             s_start = float(sc.get("start") if "start" in sc else sc.get("start_time", 0.0))
             s_end = float(sc.get("end") if "end" in sc else sc.get("end_time", s_start + float(sc.get("duration", 5.0))))
-            lyrics = sc.get("line") or sc.get("lyrics") or sc.get("dialogue") or f"Musical Adventure Scene {idx}"
+            # Only use the lyric line field — never fall back to dialogue/placeholders
+            lyrics = (sc.get("line") or sc.get("lyrics") or "").strip()
             if s_start >= total_duration_sec:
                 break
-            entry = f"{idx}\n{fmt_time(s_start)} --> {fmt_time(min(total_duration_sec, s_end))}\n{lyrics.strip()}\n"
+            if not _is_real_lyric(lyrics):
+                continue
+            entry = f"{entry_idx}\n{fmt_time(s_start)} --> {fmt_time(min(total_duration_sec, s_end))}\n{lyrics}\n"
             srt_entries.append(entry)
+            entry_idx += 1
     else:
         current_sec = 0.5
-        idx = 1
-        while current_sec < total_duration_sec:
-            sc = scenes[(idx - 1) % len(scenes)]
+        for sc in scenes:
+            if current_sec >= total_duration_sec:
+                break
             dur = float(sc.get("duration", 6.0))
             end_sec = min(total_duration_sec, current_sec + dur - 0.5)
-            lyrics = sc.get("lyrics") or sc.get("dialogue") or f"Musical Adventure Scene {idx}"
-
-            entry = f"{idx}\n{fmt_time(current_sec)} --> {fmt_time(end_sec)}\n{lyrics}\n"
-            srt_entries.append(entry)
+            # Only use real lyric text — skip dialogue/placeholder fallbacks
+            lyrics = (sc.get("lyrics") or "").strip()
+            if _is_real_lyric(lyrics):
+                entry = f"{entry_idx}\n{fmt_time(current_sec)} --> {fmt_time(end_sec)}\n{lyrics}\n"
+                srt_entries.append(entry)
+                entry_idx += 1
             current_sec += dur
-            idx += 1
 
     with open(output_srt, "w", encoding="utf-8") as f:
         f.write("\n".join(srt_entries))

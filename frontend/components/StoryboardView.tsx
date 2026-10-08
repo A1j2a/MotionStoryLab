@@ -29,7 +29,9 @@ import {
  ImageIcon,
  Upload,
  RefreshCw,
+ Play,
 } from "lucide-react";
+import SceneVideoModal from "@/components/SceneVideoModal";
 
 interface StoryboardViewProps {
  projectId: string;
@@ -55,7 +57,26 @@ export function StoryboardView({
  const [copiedAllPrompts, setCopiedAllPrompts] = useState(false);
  const [copiedSceneId, setCopiedSceneId] = useState<string | null>(null);
  const [copiedPromptId, setCopiedPromptId] = useState<string | null>(null);
+ const [copiedPromptIds, setCopiedPromptIds] = useState<Set<string>>(new Set());
  const [aiSettings, setAiSettings] = useState<AISettings | null>(null);
+
+ // Initialize and persist copied prompt IDs across reloads and database states
+ useEffect(() => {
+ try {
+ const stored: string[] = JSON.parse(
+ localStorage.getItem(`msl_copied_prompts_${projectId}`) || "[]"
+ );
+ const fromScenes = scenes
+ .filter((s) => s.prompt_status && s.prompt_status !== "NOT_COPIED")
+ .map((s) => s.id);
+ setCopiedPromptIds(new Set([...stored, ...fromScenes]));
+ } catch {
+ const fromScenes = scenes
+ .filter((s) => s.prompt_status && s.prompt_status !== "NOT_COPIED")
+ .map((s) => s.id);
+ setCopiedPromptIds(new Set(fromScenes));
+ }
+ }, [projectId, scenes]);
 
  // Manual workflow state inside Storyboard
  const [copyStatus, setCopyStatus] = useState<{ total_scenes: number; copied_count: number; uploaded_count: number } | null>(null);
@@ -86,6 +107,7 @@ export function StoryboardView({
  const [thumbTimestamp, setThumbTimestamp] = useState<number>(Date.now());
  const [videoTimestamp, setVideoTimestamp] = useState<number>(Date.now());
  const [videoError, setVideoError] = useState<boolean>(false);
+ const [selectedSlotScene, setSelectedSlotScene] = useState<Scene | null>(null);
 
  const handleRunAiMatch = async () => {
  if (!projectId) return;
@@ -267,7 +289,18 @@ export function StoryboardView({
  const prompt = getVideoPrompt(sc);
  navigator.clipboard.writeText(prompt);
  setCopiedPromptId(sc.id);
- setTimeout(() => setCopiedPromptId(null), 2000);
+ setTimeout(() => setCopiedPromptId(null), 2500);
+
+ // Update persistent copied prompt IDs in state and localStorage
+ setCopiedPromptIds((prev) => {
+ const next = new Set(prev);
+ next.add(sc.id);
+ try {
+ localStorage.setItem(`msl_copied_prompts_${projectId}`, JSON.stringify(Array.from(next)));
+ } catch {}
+ return next;
+ });
+
  try {
  await api.markSceneCopied(projectId, sc.id);
  if (onScenesUpdated) {
@@ -280,20 +313,60 @@ export function StoryboardView({
  }
  };
 
- const handleCopyAllVideoPrompts = () => {
+ const handleCopyAllVideoPrompts = async () => {
  if (!scenes || scenes.length === 0) return;
- const text = scenes
- .map((sc) => {
- const p = getVideoPrompt(sc);
- return `### SCENE ${sc.scene_number.toString().padStart(2, "0")} (${sc.duration.toFixed(1)}s)
+
+ // Build character identity header from the first scene's characters list
+ const firstScene = scenes[0];
+ const charList: string[] = [];
+ if (Array.isArray(firstScene?.characters)) {
+  (firstScene.characters as any[]).forEach((c: any) => {
+   const name  = typeof c === "object" ? (c.name || c.character_id || "") : String(c);
+   const app   = typeof c === "object" ? (c.appearance || "") : "";
+   const cloth = typeof c === "object" ? (c.clothing || "") : "";
+   const colors = typeof c === "object" && Array.isArray(c.colors) ? c.colors.join(", ") : "";
+   let desc = name;
+   if (app)    desc += ` — ${app}`;
+   if (cloth)  desc += `, wearing ${cloth}`;
+   if (colors) desc += `, palette: ${colors}`;
+   if (desc.trim()) charList.push(desc);
+  });
+ }
+ const charHeader = charList.length > 0
+  ? `CHARACTER BIBLE:\n${charList.map((c) => `  • ${c}`).join("\n")}\n\n`
+  : "";
+
+ const text = charHeader + scenes
+  .map((sc) => {
+   const p = getVideoPrompt(sc);
+   return `### SCENE ${sc.scene_number.toString().padStart(2, "0")} (${sc.duration.toFixed(1)}s)
 Lyrics: "${sc.lyrics || sc.dialogue || ""}"
 AI Video Generation Prompt:
 ${p}`;
- })
- .join("\n\n");
+  })
+  .join("\n\n");
  navigator.clipboard.writeText(text);
  setCopiedAllPrompts(true);
- setTimeout(() => setCopiedAllPrompts(false), 2000);
+ setTimeout(() => setCopiedAllPrompts(false), 2500);
+
+ // Mark all scenes copied locally and in localStorage
+ const allIds = scenes.map((s) => s.id);
+ setCopiedPromptIds(new Set(allIds));
+ try {
+  localStorage.setItem(`msl_copied_prompts_${projectId}`, JSON.stringify(allIds));
+ } catch {}
+
+ // Persist all scene copies to backend
+ try {
+  await Promise.all(scenes.map((s) => api.markSceneCopied(projectId, s.id).catch(() => null)));
+  if (onScenesUpdated) {
+   onScenesUpdated(scenes.map((s) => ({ ...s, prompt_status: "PROMPT_COPIED" })));
+  }
+  const st = await api.getCopyStatus(projectId);
+  setCopyStatus(st);
+ } catch (e) {
+  console.error("Mark all prompts copied failed:", e);
+ }
  };
 
  const handleCopyAllScenes = () => {
@@ -514,14 +587,21 @@ ${prompt}`;
  const isCompleted = sc.status === "COMPLETED";
  const isRendering = rerenderingId === sc.id;
  const isCopied = copiedSceneId === sc.id;
- const isPromptCopied = copiedPromptId === sc.id;
+ const isJustCopied = copiedPromptId === sc.id;
+ const isPromptCopied =
+ copiedPromptIds.has(sc.id) ||
+ (sc.prompt_status && sc.prompt_status !== "NOT_COPIED");
  const videoPrompt = getVideoPrompt(sc);
 
  return (
  <div
  key={sc.id || idx}
- className={`bg-[#FAFAFC] border rounded-2xl p-4.5 flex flex-col justify-between space-y-3.5 transition-all shadow-2xs hover:shadow-xs ${
- isCompleted ? "border-emerald-200 bg-emerald-50/10" : "border-[#E5E5EA]"
+ className={`border rounded-2xl p-4.5 flex flex-col justify-between space-y-3.5 transition-all shadow-2xs hover:shadow-xs ${
+ isCompleted
+ ? "border-emerald-300 bg-emerald-50/15"
+ : isPromptCopied
+ ? "border-emerald-400/80 bg-white ring-1 ring-emerald-400/25"
+ : "border-[#E5E5EA] bg-[#FAFAFC]"
  }`}
  >
  <div className="space-y-3">
@@ -546,6 +626,12 @@ ${prompt}`;
  <Clock className="w-3 h-3" />
  {sc.duration.toFixed(1)}s
  </span>
+ {isPromptCopied && (
+ <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1 shadow-2xs">
+ <Check className="w-2.5 h-2.5 text-emerald-600" />
+ Copied
+ </span>
+ )}
  <span
  className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
  isCompleted
@@ -569,24 +655,51 @@ ${prompt}`;
  </div>
 
  {/* Dedicated Video Generation Prompt Box */}
- <div className="space-y-1.5 bg-gradient-to-br from-amber-50/70 to-orange-50/70 border border-amber-200/90 rounded-xl p-3">
+ <div
+ className={`space-y-2 rounded-xl p-3 transition-all duration-300 border-2 ${
+ isPromptCopied
+ ? "bg-gradient-to-br from-emerald-50 via-teal-50/60 to-emerald-50/40 border-emerald-500 shadow-xs ring-2 ring-emerald-400/25"
+ : "bg-gradient-to-br from-amber-50/70 to-orange-50/70 border-amber-200/90"
+ }`}
+ >
  <div className="flex items-center justify-between gap-1">
+ <div className="flex items-center gap-1.5">
+ {isPromptCopied ? (
+ <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-300 uppercase tracking-wider shadow-2xs">
+ <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+ <span>Prompt Copied</span>
+ </span>
+ ) : (
  <div className="flex items-center gap-1.5">
  <Sparkles className="w-3.5 h-3.5 text-orange-600 shrink-0" />
  <span className="text-[10px] font-extrabold text-orange-900 uppercase tracking-wider">
  3D Video Prompt
  </span>
  </div>
+ )}
+ </div>
+
  <button
  type="button"
  onClick={() => handleCopyVideoPrompt(sc)}
- className="inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-bold rounded-lg bg-white hover:bg-orange-500 hover:text-white text-orange-700 border border-orange-200 shadow-2xs transition-all cursor-pointer"
+ className={`inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-bold rounded-lg transition-all cursor-pointer shadow-2xs ${
+ isJustCopied
+ ? "bg-emerald-600 text-white border border-emerald-600 ring-2 ring-emerald-300 scale-105"
+ : isPromptCopied
+ ? "bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-600"
+ : "bg-white hover:bg-orange-500 hover:text-white text-orange-700 border border-orange-200"
+ }`}
  title="Copy prompt for Luma / Kling / Seedance / Runway"
  >
- {isPromptCopied ? (
+ {isJustCopied ? (
  <>
- <Check className="w-3 h-3 text-emerald-600" />
- <span className="text-emerald-700">Copied!</span>
+ <Check className="w-3 h-3 text-white" />
+ <span>Copied!</span>
+ </>
+ ) : isPromptCopied ? (
+ <>
+ <Check className="w-3 h-3 text-white" />
+ <span>Copied ✓</span>
  </>
  ) : (
  <>
@@ -597,9 +710,31 @@ ${prompt}`;
  </button>
  </div>
 
- <p className="text-[11px] font-normal text-neutral-800 bg-white/90 p-2.5 rounded-lg border border-amber-100 leading-relaxed max-h-32 overflow-y-auto select-all">
+ <p
+ className={`text-[11px] font-normal p-2.5 rounded-lg border leading-relaxed max-h-32 overflow-y-auto select-all transition-colors ${
+ isPromptCopied
+ ? "bg-white/95 border-emerald-200 text-emerald-950 font-medium"
+ : "bg-white/90 border-amber-100 text-neutral-800"
+ }`}
+ >
  {videoPrompt}
  </p>
+
+ {isPromptCopied && (
+ <div className="flex items-center justify-between text-[10px] text-emerald-700 font-semibold pt-0.5">
+ <span className="flex items-center gap-1">
+ <Check className="w-3 h-3 text-emerald-600" />
+ Ready for Kling / Seedance / Wan 2.1
+ </span>
+ <button
+ type="button"
+ onClick={() => handleCopyVideoPrompt(sc)}
+ className="text-[10px] text-emerald-800 underline hover:text-emerald-950 font-medium cursor-pointer"
+ >
+ Copy Again
+ </button>
+ </div>
+ )}
  </div>
 
  {/* Visual Parameters */}
@@ -728,11 +863,12 @@ ${prompt}`;
  return (
  <div
  key={s.id}
- title={hasFile ? `Scene ${s.scene_number}: Assigned (${fileName} - ${dur.toFixed(1)}s)` : `Scene ${s.scene_number}: Vacant - upload or assign video clip`}
- className={`p-2.5 rounded-xl text-center flex flex-col items-center justify-between gap-1.5 border-2 transition-all min-h-[76px] ${
+ onClick={() => setSelectedSlotScene(s)}
+ title={hasFile ? `Scene ${s.scene_number}: Click to preview video & prompt (${fileName} - ${dur.toFixed(1)}s)` : `Scene ${s.scene_number}: Vacant - click to assign or match with AI`}
+ className={`p-2.5 rounded-xl text-center flex flex-col items-center justify-between gap-1.5 border-2 transition-all min-h-[76px] cursor-pointer hover:shadow-md hover:scale-[1.02] active:scale-95 group ${
  hasFile
- ? "bg-white border-emerald-500 text-emerald-950 shadow-xs"
- : "bg-amber-50/60 border-dashed border-amber-400 text-amber-900"
+ ? "bg-white border-emerald-500 text-emerald-950 shadow-xs hover:border-emerald-600"
+ : "bg-amber-50/60 border-dashed border-amber-400 text-amber-900 hover:border-amber-500"
  }`}
  >
  <div className="flex items-center justify-between w-full">
@@ -752,10 +888,11 @@ ${prompt}`;
  </div>
  {hasFile ? (
  <div className="w-full flex flex-col items-center">
- <span className="text-[10px] font-mono font-bold text-slate-700 truncate w-full" title={fileName || ""}>
+ <span className="text-[10px] font-mono font-bold text-slate-700 truncate w-full group-hover:text-emerald-700 transition-colors" title={fileName || ""}>
  {fileName}
  </span>
- <span className="text-[9px] font-semibold text-emerald-700">
+ <span className="text-[9px] font-semibold text-emerald-700 flex items-center gap-1">
+  <Play className="w-2 h-2 fill-emerald-600 shrink-0" />
   {dur.toFixed(1)}s
  </span>
  </div>
@@ -764,8 +901,8 @@ ${prompt}`;
  <span className="text-[10px] font-medium text-amber-700 block">
  No Video
  </span>
- <span className="text-[9px] text-amber-500">
- Slot empty
+ <span className="text-[9px] text-amber-500 group-hover:text-amber-700 font-bold transition-colors">
+ Click to Assign
  </span>
  </div>
  )}
@@ -1285,6 +1422,18 @@ ${prompt}`;
  </div>
  )}
  </div>
+
+ <SceneVideoModal
+  isOpen={!!selectedSlotScene}
+  onClose={() => setSelectedSlotScene(null)}
+  projectId={projectId}
+  scene={selectedSlotScene}
+  onSceneUpdated={(updatedScene) => {
+   const nextScenes = scenes.map((sc) => (sc.id === updatedScene.id ? { ...sc, ...updatedScene } : sc));
+   if (onScenesUpdated) onScenesUpdated(nextScenes);
+   setSelectedSlotScene((prev) => (prev && prev.id === updatedScene.id ? { ...prev, ...updatedScene } : prev));
+  }}
+ />
  </div>
  );
 }

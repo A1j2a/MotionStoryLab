@@ -723,7 +723,9 @@ def _probe_video_duration(path: str) -> Optional[float]:
 async def _auto_check_and_confirm_sequence(project_id: str, session: AsyncSession) -> bool:
     """
     Checks if all storyboard scenes for the project have uploaded videos.
-    If yes, automatically sets their sequential order (1..N) and prompt_status to ORDER_CONFIRMED.
+    If yes, sets their scene_order to scene_number (1..N in creation order) and
+    marks them ORDER_CONFIRMED.  scene_order is ALWAYS overwritten so stale
+    or previously-corrupted values cannot persist.
     Returns True if all scenes are ready.
     """
     result = await session.execute(
@@ -765,8 +767,10 @@ async def _auto_check_and_confirm_sequence(project_id: str, session: AsyncSessio
             break
 
     if all_ready:
+        # ALWAYS set scene_order = scene_number (sorted asc) so the order is
+        # deterministic and never based on stale/corrupted previous values.
         for idx, s in enumerate(scenes, start=1):
-            s.scene_order = s.scene_order if s.scene_order is not None else idx
+            s.scene_order = idx          # ← always overwrite, never preserve stale
             s.prompt_status = "ORDER_CONFIRMED"
         await session.commit()
         return True
@@ -828,7 +832,9 @@ async def upload_scene_video(
     scene.uploaded_file = str(dest)
     scene.uploaded_duration = duration
     scene.prompt_status = "VIDEO_UPLOADED"
-    scene.scene_order = scene.scene_order if scene.scene_order is not None else scene.scene_number
+    # Always sync scene_order to scene_number on upload so the order is
+    # deterministic; confirm-sequence or auto-confirm can refine it later.
+    scene.scene_order = scene.scene_number
     scene.local_video_path = str(dest)
     scene.render_path = str(dest)
     scene.status = "COMPLETED"
@@ -1169,9 +1175,247 @@ async def assign_unresolved_video(
     }
 
 
+class SceneReassignPayload(BaseModel):
+    apply_match: bool = True
+    candidate_tmp_path: Optional[str] = None
+
+
+@router.get("/{project_id}/scenes/{scene_id}/video")
+@router.head("/{project_id}/scenes/{scene_id}/video")
+async def stream_scene_video(
+    project_id: str,
+    scene_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Stream an individual scene's uploaded or rendered video file for in-browser playback."""
+    scene_repo = SceneRepository(session)
+    scene = await scene_repo.get(scene_id)
+    if not scene or scene.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Scene not found")
+
+    video_path: Optional[Path] = None
+    if scene.uploaded_file and Path(scene.uploaded_file).exists():
+        video_path = Path(scene.uploaded_file)
+    elif scene.local_video_path and Path(scene.local_video_path).exists():
+        video_path = Path(scene.local_video_path)
+    elif scene.render_path and Path(scene.render_path).exists():
+        video_path = Path(scene.render_path)
+    else:
+        project_dir = Path(str(settings.resolved_project_dir)) / project_id / "uploaded_scenes"
+        if project_dir.exists():
+            for cand in [
+                project_dir / f"scene_{scene.scene_number:03d}.mp4",
+                project_dir / f"scene_{scene.scene_number:02d}.mp4",
+                project_dir / f"scene_{scene.scene_number}.mp4",
+                project_dir / f"scene_{scene.scene_number:03d}.mov",
+                project_dir / f"scene_{scene.scene_number:02d}.mov",
+                project_dir / f"scene_{scene.scene_number}.mov",
+                project_dir / f"scene_{scene.scene_number:03d}.webm",
+                project_dir / f"scene_{scene.scene_number:02d}.webm",
+                project_dir / f"scene_{scene.scene_number}.webm",
+            ]:
+                if cand.exists():
+                    video_path = cand
+                    break
+
+    if not video_path or not video_path.exists():
+        raise HTTPException(status_code=404, detail="No video file found for this scene slot")
+
+    ext = video_path.suffix.lower()
+    media_type = "video/mp4"
+    if ext == ".mov":
+        media_type = "video/quicktime"
+    elif ext == ".webm":
+        media_type = "video/webm"
+
+    return FileResponse(
+        path=str(video_path),
+        media_type=media_type,
+        content_disposition_type="inline",
+        filename=video_path.name,
+    )
+
+
+@router.post("/{project_id}/scenes/{scene_id}/ai-reassign", response_model=Dict[str, Any])
+async def ai_reassign_scene_video(
+    project_id: str,
+    scene_id: str,
+    payload: Optional[SceneReassignPayload] = None,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """
+    Re-evaluate and match a scene slot's visual prompt against available uploaded video clips using AI.
+    If apply_match is True, reassigns the best matching video clip to this scene slot and refreshes durations.
+    """
+    scene_repo = SceneRepository(session)
+    scene = await scene_repo.get(scene_id)
+    if not scene or scene.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Scene not found")
+
+    result_list = await session.execute(
+        select(Scene).where(Scene.project_id == project_id).order_by(Scene.scene_number.asc())
+    )
+    all_scenes = result_list.scalars().all()
+
+    project_dir = Path(str(settings.resolved_project_dir)) / project_id / "uploaded_scenes"
+    project_dir.mkdir(parents=True, exist_ok=True)
+
+    all_video_files = [
+        f for f in project_dir.iterdir()
+        if f.is_file() and f.suffix.lower() in {".mp4", ".mov", ".webm"}
+    ]
+
+    if not all_video_files:
+        raise HTTPException(
+            status_code=400,
+            detail="No uploaded video files found in project. Please upload video clips first.",
+        )
+
+    apply_match = payload.apply_match if payload is not None else True
+    explicit_tmp = payload.candidate_tmp_path if payload is not None else None
+
+    # Handle explicit candidate assignment
+    if explicit_tmp and Path(explicit_tmp).exists():
+        chosen_path = Path(explicit_tmp)
+        ext = chosen_path.suffix.lower()
+        dest = project_dir / f"scene_{scene.scene_number:03d}{ext}"
+        if chosen_path.resolve() != dest.resolve():
+            if chosen_path.name.startswith("unresolved_"):
+                chosen_path.rename(dest)
+            else:
+                shutil.copy2(chosen_path, dest)
+        duration = await asyncio.to_thread(_probe_video_duration, str(dest))
+        scene.uploaded_file = str(dest)
+        scene.uploaded_duration = duration
+        scene.prompt_status = "VIDEO_UPLOADED"
+        scene.local_video_path = str(dest)
+        scene.render_path = str(dest)
+        scene.status = "COMPLETED"
+        scene.generation_status = "UPLOADED"
+        await scene_repo.update(scene)
+        await session.commit()
+        all_ready = await _auto_check_and_confirm_sequence(project_id, session)
+
+        return {
+            "status": "success",
+            "scene_id": scene.id,
+            "scene_number": scene.scene_number,
+            "assigned_file": dest.name,
+            "duration": duration,
+            "confidence": 100.0,
+            "match_reason": f"Manually assigned file '{dest.name}' to Scene {scene.scene_number:02d}",
+            "match_source": "manual_selection",
+            "reassigned": True,
+            "all_scenes_ready": all_ready,
+            "scene": {
+                "id": scene.id,
+                "scene_number": scene.scene_number,
+                "uploaded_file": scene.uploaded_file,
+                "uploaded_duration": scene.uploaded_duration,
+                "video_prompt": scene.video_prompt,
+                "lyrics": scene.lyrics,
+            },
+        }
+
+    # Gather candidates: prioritize unresolved files if present, else consider all video clips
+    unresolved_files = [f for f in all_video_files if f.name.startswith("unresolved_")]
+    candidate_files = unresolved_files if unresolved_files else all_video_files
+
+    candidates_info = []
+    clean_filenames = [f.name.replace("unresolved_", "") for f in candidate_files]
+    fn_to_file = {f.name.replace("unresolved_", ""): f for f in candidate_files}
+
+    # Query AI provider for semantic suggestions
+    ai_matches = {}
+    try:
+        ai_matches = _ai_match_filenames_to_scenes([scene], clean_filenames)
+    except Exception as e:
+        logger.warning(f"AI single scene match exception: {e}")
+
+    for clean_fn in clean_filenames:
+        src_file = fn_to_file[clean_fn]
+        score, reason, _ = _calculate_semantic_similarity(clean_fn, scene, list(all_scenes))
+        source = "semantic_keywords"
+
+        if clean_fn in ai_matches and ai_matches[clean_fn]["scene_number"] == scene.scene_number:
+            ai_info = ai_matches[clean_fn]
+            score = max(score, ai_info["confidence"]) + 10.0
+            reason = f"AI Match ({int(ai_info['confidence'])}%): {ai_info['reason']}"
+            source = "ai"
+
+        is_current = (
+            scene.uploaded_file is not None
+            and Path(scene.uploaded_file).name == src_file.name
+        )
+        if is_current:
+            score += 5.0
+
+        candidates_info.append({
+            "filename": clean_fn,
+            "tmp_path": str(src_file),
+            "confidence": min(99.0, round(score, 1)),
+            "reason": reason,
+            "source": source,
+            "is_current": is_current,
+        })
+
+    candidates_info.sort(key=lambda x: x["confidence"], reverse=True)
+    best_candidate = candidates_info[0] if candidates_info else None
+
+    was_reassigned = False
+    if apply_match and best_candidate:
+        chosen_path = Path(str(best_candidate["tmp_path"]))
+        ext = chosen_path.suffix.lower()
+        dest = project_dir / f"scene_{scene.scene_number:03d}{ext}"
+        if chosen_path.resolve() != dest.resolve():
+            if chosen_path.name.startswith("unresolved_"):
+                chosen_path.rename(dest)
+            else:
+                shutil.copy2(chosen_path, dest)
+            was_reassigned = True
+
+        duration = await asyncio.to_thread(_probe_video_duration, str(dest))
+        scene.uploaded_file = str(dest)
+        scene.uploaded_duration = duration
+        scene.prompt_status = "VIDEO_UPLOADED"
+        scene.local_video_path = str(dest)
+        scene.render_path = str(dest)
+        scene.status = "COMPLETED"
+        scene.generation_status = "UPLOADED"
+        await scene_repo.update(scene)
+        await session.commit()
+
+    all_ready = await _auto_check_and_confirm_sequence(project_id, session)
+
+    assigned_name = Path(scene.uploaded_file).name if scene.uploaded_file else (best_candidate["filename"] if best_candidate else None)
+
+    return {
+        "status": "success",
+        "scene_id": scene.id,
+        "scene_number": scene.scene_number,
+        "assigned_file": assigned_name,
+        "duration": scene.uploaded_duration,
+        "confidence": best_candidate["confidence"] if best_candidate else 50.0,
+        "match_reason": best_candidate["reason"] if best_candidate else "Prompt analyzed and verified",
+        "match_source": best_candidate["source"] if best_candidate else "semantic",
+        "reassigned": was_reassigned,
+        "candidates": candidates_info,
+        "all_scenes_ready": all_ready,
+        "scene": {
+            "id": scene.id,
+            "scene_number": scene.scene_number,
+            "uploaded_file": scene.uploaded_file,
+            "uploaded_duration": scene.uploaded_duration,
+            "video_prompt": scene.video_prompt,
+            "lyrics": scene.lyrics,
+        },
+    }
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Sequence Confirmation + Final Assembly
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class ConfirmSequencePayload(BaseModel):
     scene_order: List[int]  # List of scene_numbers in final confirmed order
@@ -1225,7 +1469,11 @@ async def download_formatted_scenes_zip(
 
     result = await session.execute(
         select(Scene).where(Scene.project_id == project_id).order_by(
-            Scene.scene_order.asc(), Scene.scene_number.asc()
+            # COALESCE so NULL scene_order scenes sort after explicitly-ordered ones
+            # then fall back to scene_number to keep creation order intact.
+            Scene.scene_order.is_(None).asc(),
+            Scene.scene_order.asc(),
+            Scene.scene_number.asc()
         )
     )
     scenes = result.scalars().all()
@@ -1265,15 +1513,70 @@ async def download_formatted_scenes_zip(
     clean_title = re.sub(r"[^\w\s-]", "", project.title or project.topic or "scenes").strip().replace(" ", "_")
     zip_path = output_dir / f"formatted_scenes_{project_id[:8]}.zip"
 
-    manifest_lines = [
+    # Pull thumbnail prompt from project metadata
+    meta = project.metadata_json or {}
+    thumbnail_prompt = (
+        meta.get("thumbnail_prompt")
+        or (meta.get("manual_seo") or {}).get("thumbnail_prompt")
+        or ""
+    )
+    if not thumbnail_prompt:
+        thumb_txt = project_dir / "thumbnail_prompt.txt"
+        if thumb_txt.exists():
+            try:
+                thumbnail_prompt = thumb_txt.read_text(encoding="utf-8").strip()
+            except Exception:
+                pass
+
+    seo = meta.get("manual_seo") or {}
+    project_title = seo.get("title") or project.title or project.topic or project_id
+    project_topic = project.topic or project.title or ""
+
+    sco_lines = [
         "==================================================",
-        f" Project: {project.title or project.topic or project_id}",
-        f" Total Formatted Scenes: {len(valid_scenes)}",
-        f" Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}",
+        f"  PROJECT: {project_title}",
+        f"  Topic: {project_topic}",
+        f"  Total Scenes: {len(valid_scenes)}",
+        f"  Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}",
         "==================================================",
         "",
-        "CHRONOLOGICAL SCENE SEQUENCE:",
     ]
+
+    if thumbnail_prompt:
+        sco_lines += [
+            "THUMBNAIL PROMPT (for Midjourney / FLUX / Stable Diffusion):",
+            "-" * 60,
+            thumbnail_prompt,
+            "",
+        ]
+
+    sco_lines += [
+        "==================================================",
+        "SCENE-BY-SCENE CONTENT OVERVIEW (SCO):",
+        "==================================================",
+        "",
+    ]
+
+    for idx, s in enumerate(valid_scenes, start=1):
+        arc_name = f"scene_{idx:02d}" + (Path(s.uploaded_file).suffix or ".mp4")
+        chars = s.characters or []
+        char_str = ", ".join(
+            c.get("name", "") if isinstance(c, dict) else str(c) for c in chars
+        ) if chars else "Main character"
+        cam = s.camera or {}
+        cam_str = f"{cam.get('shot', 'medium')} / {cam.get('movement', 'smooth')}" if isinstance(cam, dict) else str(cam)
+
+        sco_lines += [
+            f"--- SCENE {idx:02d} ---",
+            f"  File      : {arc_name}",
+            f"  Duration  : {s.uploaded_duration or s.duration or 0:.1f}s",
+            f"  Characters: {char_str}",
+            f"  Camera    : {cam_str}",
+            f"  Lyrics    : {s.lyrics or ''}",
+            f"  Video Prompt:",
+            f"  {s.video_prompt or ''}",
+            "",
+        ]
 
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
         for idx, s in enumerate(valid_scenes, start=1):
@@ -1281,11 +1584,8 @@ async def download_formatted_scenes_zip(
             ext = src_file.suffix or ".mp4"
             arc_name = f"scene_{idx:02d}{ext}"
             zf.write(src_file, arcname=arc_name)
-            manifest_lines.append(
-                f"{idx:02d}. {arc_name} (Scene #{s.scene_number:02d}, Duration: {s.uploaded_duration or 0:.1f}s) - {s.lyrics or s.video_prompt or 'N/A'}"
-            )
 
-        zf.writestr("sequence_manifest.txt", "\n".join(manifest_lines))
+        zf.writestr("scene_content_overview.txt", "\n".join(sco_lines))
 
     return FileResponse(
         path=str(zip_path),
@@ -1487,7 +1787,10 @@ async def generate_final_video_from_uploads(
 
     result = await session.execute(
         select(Scene).where(Scene.project_id == project_id).order_by(
-            Scene.scene_order.asc(), Scene.scene_number.asc()
+            # COALESCE: NULL scene_order sorts after explicit values, then scene_number as tiebreaker
+            Scene.scene_order.is_(None).asc(),
+            Scene.scene_order.asc(),
+            Scene.scene_number.asc()
         )
     )
     scenes = result.scalars().all()
